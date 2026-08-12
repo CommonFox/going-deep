@@ -23,8 +23,12 @@ function pair per table.
   counts, injuries, seasonal data, depth charts, player bios, Next Gen Stats, FTN charting data,
   and a cross-platform player ID crosswalk.
 - `src/ffb/sleeper.py` — Sleeper's public league API (no auth required): league settings, rosters,
-  users, and weekly matchups (including starting lineups). Set `LEAGUE_ID` in the module before
-  running.
+  users, weekly matchups (including starting lineups), transactions, current NFL state, and the
+  full player dictionary. Set `LEAGUE_ID` in the module before running.
+- `src/ffb/espn.py` — ESPN's fantasy API: league settings, teams, rosters, weekly matchups, and
+  the player pool. Private leagues require `ESPN_S2` and `SWID` cookies from a logged-in browser
+  session, set via a gitignored `.env` file (see `.env.example`). Set `LEAGUE_ID` and `SEASON` in
+  the module before running.
 
 ## Environment
 
