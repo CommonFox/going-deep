@@ -22,6 +22,9 @@ function pair per table.
 - `src/ffb/nfl_data.py` — nflverse data via `nfl_data_py`: weekly stats, schedules, rosters, snap
   counts, injuries, seasonal data, depth charts, player bios, Next Gen Stats, FTN charting data,
   and a cross-platform player ID crosswalk.
+- `src/ffb/sleeper.py` — Sleeper's public league API (no auth required): league settings, rosters,
+  users, and weekly matchups (including starting lineups). Set `LEAGUE_ID` in the module before
+  running.
 
 ## Environment
 
