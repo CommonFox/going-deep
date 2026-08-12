@@ -122,9 +122,50 @@ def load_players(raw_path: Path) -> None:
     _load_json_to_table(raw_path, "espn_players")
 
 
+def fetch_player_ownership(league_id: str, season: int) -> Path:
+    """Fetch the player pool with ownership %, ADP, and projections and save raw to JSON."""
+    data = _get(
+        _league_url(league_id, season),
+        params={"view": "kona_player_info"},
+        headers={
+            "x-fantasy-filter": json.dumps(
+                {"players": {"limit": 3000, "sortPercOwned": {"sortAsc": False, "sortPriority": 1}}}
+            )
+        },
+    )
+    return _save_raw_json(data["players"], f"player_ownership_{league_id}_{season}")
+
+
+def load_player_ownership(raw_path: Path) -> None:
+    _load_json_to_table(raw_path, "espn_player_ownership")
+
+
+def fetch_transactions(league_id: str, season: int) -> Path:
+    """Fetch waiver claims, trades, and adds/drops and save raw to JSON."""
+    data = _get(_league_url(league_id, season), params={"view": "mTransactions2"})
+    return _save_raw_json(data.get("transactions", []), f"transactions_{league_id}_{season}")
+
+
+def load_transactions(raw_path: Path) -> None:
+    _load_json_to_table(raw_path, "espn_transactions")
+
+
+def fetch_boxscores(league_id: str, season: int) -> Path:
+    """Fetch per-player boxscore stats within each matchup and save raw to JSON."""
+    data = _get(_league_url(league_id, season), params={"view": "mBoxscore"})
+    return _save_raw_json(data["schedule"], f"boxscores_{league_id}_{season}")
+
+
+def load_boxscores(raw_path: Path) -> None:
+    _load_json_to_table(raw_path, "espn_boxscores")
+
+
 if __name__ == "__main__":
     load_league(fetch_league(LEAGUE_ID, SEASON))
     load_teams(fetch_teams(LEAGUE_ID, SEASON))
     load_rosters(fetch_rosters(LEAGUE_ID, SEASON))
     load_matchups(fetch_matchups(LEAGUE_ID, SEASON))
     load_players(fetch_players(SEASON))
+    load_player_ownership(fetch_player_ownership(LEAGUE_ID, SEASON))
+    load_transactions(fetch_transactions(LEAGUE_ID, SEASON))
+    load_boxscores(fetch_boxscores(LEAGUE_ID, SEASON))
