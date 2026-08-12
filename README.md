@@ -30,6 +30,10 @@ function pair per table.
   leagues require `ESPN_S2` and `SWID` cookies from a logged-in browser session, set via a
   gitignored `.env` file (see `.env.example`). Set `LEAGUE_ID` and `SEASON` in the module before
   running.
+- `src/ffb/fantasypros.py` — FantasyPros consensus expert rankings (ECR): preseason overall draft
+  rankings (standard/half-PPR/PPR) and in-season weekly rankings by position. No auth required;
+  extracts the `ecrData` JSON embedded in FantasyPros' rankings pages, since they don't offer a
+  free public API. Set `current_week` in the module before running in-season.
 
 ## Environment
 
