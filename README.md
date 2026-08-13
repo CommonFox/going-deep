@@ -52,6 +52,13 @@ Run a source module directly to fetch and load its tables into the warehouse:
 python -m src.ffb.nfl_data
 ```
 
+To rebuild the full warehouse from scratch (e.g. on a new machine), run every source in
+sequence:
+
+```bash
+./scripts/build_warehouse.sh
+```
+
 Query the warehouse with the DuckDB CLI or Python:
 
 ```bash
