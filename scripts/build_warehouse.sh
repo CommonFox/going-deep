@@ -12,3 +12,9 @@ python -m src.ffb.nfl_data
 python -m src.ffb.sleeper
 python -m src.ffb.espn
 python -m src.ffb.fantasypros
+python -m src.ffb.fftoday
+python -m src.ffb.cbs
+
+# Depends on every source above already being loaded (joins their projections through the
+# nflverse `ids` crosswalk from nfl_data.py).
+python -m src.ffb.consensus

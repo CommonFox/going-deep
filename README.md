@@ -34,6 +34,16 @@ function pair per table.
   rankings (standard/half-PPR/PPR) and in-season weekly rankings by position. No auth required;
   extracts the `ecrData` JSON embedded in FantasyPros' rankings pages, since they don't offer a
   free public API. Set `current_week` in the module before running in-season.
+- `src/ffb/fftoday.py` — FFToday's own season-long fantasy point projections (standard/half-PPR/
+  PPR) by position. No auth required; parses the plain HTML projections table, since FFToday
+  doesn't offer an API. Rate-limits aggressive scraping, so requests are spaced out.
+- `src/ffb/cbs.py` — CBS Sports' own season-long fantasy point projections (standard/PPR) by
+  position. No auth required; parses the plain HTML projections table, since CBS doesn't offer a
+  free API.
+- `src/ffb/consensus.py` — builds `consensus_projections`: a median/floor (20th percentile)/
+  ceiling (80th percentile) PPR projection per player, aggregated across every independent
+  projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS) via the nflverse player ID
+  crosswalk. Pure SQL over already-loaded tables — no fetch step, no network.
 
 ## Environment
 
