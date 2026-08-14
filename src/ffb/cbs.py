@@ -14,18 +14,19 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+from src.ffb.teams import normalize_team
+
 RAW_DIR = Path("data/raw/cbs")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 BASE_URL = "https://www.cbssports.com/fantasy/football/stats"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# CBS's positions and URL scoring-format slugs. There's no half-PPR variant (that slug 404s);
-# DST is fetched for completeness even though it's excluded from the cross-source join later
-# (no entry in the nflverse player ID crosswalk, since it's a team, not a player).
+# CBS's positions and URL scoring-format slugs. There's no half-PPR variant (that slug 404s).
 POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"]
 SCORING_FORMATS = {"standard": "nonppr", "ppr": "ppr"}
 
 _CBS_ID_RE = re.compile(r"/nfl/players/(\d+)/")
+_TEAM_ABBR_RE = re.compile(r"/nfl/teams/([A-Z]+)/")
 
 
 def fetch_season_projections(position: str, scoring: str, season: int) -> Path:
@@ -46,12 +47,6 @@ def _parse_table(html: str) -> pd.DataFrame:
     records = []
     for row in soup.find_all("tr", class_="TableBase-bodyTr"):
         name_cell = row.find("td")
-        long_name = name_cell.find("span", class_="CellPlayerName--long")
-        anchor = long_name.find("a") if long_name else name_cell.find("a")
-        if not anchor:
-            continue
-        match = _CBS_ID_RE.search(anchor.get("href", ""))
-        team_span = name_cell.find("span", class_="CellPlayerName-team")
 
         number_cells = row.find_all("td", class_=lambda c: c and "TableBase-bodyTd--number" in c)
         if len(number_cells) < 2:
@@ -62,15 +57,41 @@ def _parse_table(html: str) -> pd.DataFrame:
         except ValueError:
             continue
 
-        records.append(
-            {
-                "cbs_id": int(match.group(1)) if match else None,
-                "player_name": anchor.get_text(strip=True),
-                "team": team_span.get_text(strip=True) if team_span else None,
-                "projected_points": fpts,
-                "fppg": fppg,
-            }
-        )
+        long_name = name_cell.find("span", class_="CellPlayerName--long")
+        if long_name:
+            # Individual player row.
+            anchor = long_name.find("a")
+            if not anchor:
+                continue
+            match = _CBS_ID_RE.search(anchor.get("href", ""))
+            team_span = name_cell.find("span", class_="CellPlayerName-team")
+            records.append(
+                {
+                    "cbs_id": int(match.group(1)) if match else None,
+                    "player_name": anchor.get_text(strip=True),
+                    "team": team_span.get_text(strip=True) if team_span else None,
+                    "projected_points": fpts,
+                    "fppg": fppg,
+                }
+            )
+        else:
+            # Team defense row: a team logo/name lockup instead of a player name. The logo's
+            # own <a> (matched first by a bare href search) has no text, so target the visible
+            # team-name span specifically.
+            team_span = name_cell.find("span", class_="TeamName")
+            anchor = team_span.find("a") if team_span else None
+            match = _TEAM_ABBR_RE.search(anchor.get("href", "")) if anchor else None
+            if not match:
+                continue
+            records.append(
+                {
+                    "cbs_id": None,
+                    "player_name": anchor.get_text(strip=True),
+                    "team": normalize_team(match.group(1)),
+                    "projected_points": fpts,
+                    "fppg": fppg,
+                }
+            )
     return pd.DataFrame(records)
 
 

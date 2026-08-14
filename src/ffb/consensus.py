@@ -1,21 +1,34 @@
-"""Build the consensus (median/floor/ceiling) projection table from every projection source.
+"""Build the consensus (median/floor/ceiling) projection tables from every projection source.
 
 Pure warehouse-to-warehouse SQL — no fetch step, no network, just a transform over tables that
-the other source modules (espn, sleeper, fftoday, cbs) have already loaded, joined through the
-nflverse `ids` player crosswalk (loaded by nfl_data.py) onto a common `gsis_id`.
+the other source modules (espn, sleeper, fftoday, cbs) have already loaded.
 
-DST is excluded: team defenses have no entry in the player-level `ids` crosswalk.
+Two output tables, because team defenses need a different join key than individual players:
+- consensus_projections: skill positions (QB/RB/WR/TE/K), joined through the nflverse `ids`
+  player crosswalk (loaded by nfl_data.py) onto a common `gsis_id`.
+- consensus_dst_projections: team defenses, joined on a normalized team abbreviation (see
+  teams.py) instead, since `ids` is player-level and has no team-defense entries.
 """
 
 from pathlib import Path
 
 import duckdb
 
+from src.ffb.teams import normalize_team
+
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
-# Skill positions covered by every source below (DST is excluded — no entry in the player-level
-# `ids` crosswalk, since it's a team, not a player).
 _SKILL_POSITIONS = ("QB", "RB", "WR", "TE", "K")
+
+_PERCENTILE_AGGREGATES = """
+    COUNT(*) AS num_sources,
+    MIN(projected_points) AS min_points,
+    MAX(projected_points) AS max_points,
+    PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY projected_points) AS floor_p20,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY projected_points) AS median_p50,
+    PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY projected_points) AS ceiling_p80,
+    STDDEV(projected_points) AS stddev_points
+"""
 
 # Every join also matches on position, since the `ids` crosswalk has a handful of duplicate
 # external IDs among long-retired/free-agent players (verified harmless against current data —
@@ -61,13 +74,7 @@ SELECT
     gsis_id,
     ANY_VALUE(player_name) AS player_name,
     ANY_VALUE(position) AS position,
-    COUNT(*) AS num_sources,
-    MIN(projected_points) AS min_points,
-    MAX(projected_points) AS max_points,
-    PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY projected_points) AS floor_p20,
-    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY projected_points) AS median_p50,
-    PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY projected_points) AS ceiling_p80,
-    STDDEV(projected_points) AS stddev_points
+    {_PERCENTILE_AGGREGATES}
 FROM source_projections
 WHERE gsis_id IS NOT NULL
     AND projected_points IS NOT NULL
@@ -75,14 +82,57 @@ WHERE gsis_id IS NOT NULL
 GROUP BY gsis_id
 """
 
+# `team` values are normalized (via the normalize_team Python UDF registered below) before this
+# runs, since each source represents defenses differently — a full name, a bare nickname, or a
+# non-canonical abbreviation (e.g. "LAR" instead of this warehouse's "LA" for the Rams).
+_BUILD_DST_SQL = f"""
+CREATE OR REPLACE TABLE consensus_dst_projections AS
+WITH source_projections AS (
+    -- espn_projections.team is already normalized at load time (see espn.py:load_projections).
+    SELECT team, 'espn' AS source, projected_points
+    FROM espn_projections
+    WHERE position = 'DST'
+
+    UNION ALL
+
+    SELECT normalize_team(team), 'sleeper', SUM(pts_ppr)
+    FROM sleeper_projections
+    WHERE position = 'DEF'
+    GROUP BY team
+
+    UNION ALL
+
+    SELECT team, 'cbs', projected_points
+    FROM cbs_projections
+    WHERE position = 'DST' AND scoring = 'ppr'
+
+    UNION ALL
+
+    SELECT team, 'fftoday', projected_points
+    FROM fftoday_projections
+    WHERE position = 'DST' AND scoring = 'ppr'
+)
+SELECT
+    team,
+    {_PERCENTILE_AGGREGATES}
+FROM source_projections
+WHERE team IS NOT NULL AND projected_points IS NOT NULL
+GROUP BY team
+"""
+
 
 def build_consensus_projections() -> None:
     con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.create_function("normalize_team", normalize_team, ["VARCHAR"], "VARCHAR")
+
     con.execute(_BUILD_SQL)
+    con.execute(_BUILD_DST_SQL)
     (count,) = con.execute("SELECT COUNT(*) FROM consensus_projections").fetchone()
+    (dst_count,) = con.execute("SELECT COUNT(*) FROM consensus_dst_projections").fetchone()
     con.close()
 
     print(f"Built {count} rows into {WAREHOUSE_PATH} (table: consensus_projections)")
+    print(f"Built {dst_count} rows into {WAREHOUSE_PATH} (table: consensus_dst_projections)")
 
 
 if __name__ == "__main__":

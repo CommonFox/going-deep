@@ -9,6 +9,8 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
+from src.ffb.teams import normalize_team
+
 load_dotenv()
 
 RAW_DIR = Path("data/raw/espn")
@@ -163,12 +165,17 @@ def load_projections(raw_path: Path, season: int) -> None:
                 and stat.get("scoringPeriodId") == 0
                 and stat.get("seasonId") == season
             ):
+                position = POSITION_IDS.get(player.get("defaultPositionId"))
+                full_name = player.get("fullName")
                 rows.append(
                     {
                         "espn_id": player.get("id"),
-                        "player_name": player.get("fullName"),
-                        "position": POSITION_IDS.get(player.get("defaultPositionId")),
-                        "team": player.get("proTeamId"),
+                        "player_name": full_name,
+                        "position": position,
+                        # DST rows carry no useful proTeamId; derive the team abbreviation
+                        # from the name (e.g. "Texans D/ST") instead, for the team-based join
+                        # DST needs (no player ID crosswalk covers team defenses).
+                        "team": normalize_team(full_name) if position == "DST" else None,
                         "season": season,
                         "projected_points": stat.get("appliedTotal"),
                     }

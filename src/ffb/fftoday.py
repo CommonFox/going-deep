@@ -14,18 +14,19 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+from src.ffb.teams import normalize_team
+
 RAW_DIR = Path("data/raw/fftoday")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 BASE_URL = "https://www.fftoday.com/rankings/playerproj.php"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # FFToday starts returning 403s after a burst of rapid requests; a short delay between page
-# fetches keeps a full run (5 positions x 3 scoring formats) under that threshold.
+# fetches keeps a full run (6 positions x 3 scoring formats) under that threshold.
 REQUEST_DELAY_SECONDS = 2
 
-# FFToday's PosID param. DST is excluded: it has no entry in the nflverse player ID crosswalk
-# (the `ids` table) used to join projections across sources, since it's a team, not a player.
-POSITIONS = {"QB": 10, "RB": 20, "WR": 30, "TE": 40, "K": 80}
+# FFToday's PosID param.
+POSITIONS = {"QB": 10, "RB": 20, "WR": 30, "TE": 40, "K": 80, "DST": 99}
 
 # FFToday's LeagueID param selects a named scoring preset — confirmed against the page's own
 # <select name="LeagueID"> options, not guessed from URL patterns.
@@ -79,7 +80,7 @@ def _find_projections_table(soup: BeautifulSoup) -> tuple[list, list]:
     raise ValueError("Could not find a projections table with an 'FPts' column")
 
 
-def _parse_table(html: str) -> pd.DataFrame:
+def _parse_table(html: str, position: str) -> pd.DataFrame:
     soup = BeautifulSoup(html, "html.parser")
     data_rows, _header = _find_projections_table(soup)
 
@@ -88,19 +89,34 @@ def _parse_table(html: str) -> pd.DataFrame:
         cells = [c.get_text(strip=True) for c in row.find_all("td")]
         if len(cells) < 3:
             continue
-        player_name = cells[1]
         try:
             projected_points = float(cells[-1].replace(",", ""))
         except ValueError:
             continue
-        records.append(
-            {
-                "merge_name": _merge_name(player_name),
-                "player_name": player_name,
-                "team": cells[2],
-                "projected_points": projected_points,
-            }
-        )
+
+        if position == "DST":
+            # DST rows have a full team name ("Houston Texans") in place of a player name, and
+            # no separate team column — there's no player crosswalk for team defenses, so this
+            # joins by team abbreviation instead in consensus.py.
+            team_name = cells[1]
+            records.append(
+                {
+                    "merge_name": None,
+                    "player_name": team_name,
+                    "team": normalize_team(team_name),
+                    "projected_points": projected_points,
+                }
+            )
+        else:
+            player_name = cells[1]
+            records.append(
+                {
+                    "merge_name": _merge_name(player_name),
+                    "player_name": player_name,
+                    "team": cells[2],
+                    "projected_points": projected_points,
+                }
+            )
     return pd.DataFrame(records)
 
 
@@ -112,7 +128,7 @@ def load_season_projections(fetched: list[tuple[str, str, int, Path]]) -> None:
     """
     dfs = []
     for position, scoring, season, raw_path in fetched:
-        df = _parse_table(raw_path.read_text())
+        df = _parse_table(raw_path.read_text(), position)
         df["position"] = position
         df["scoring"] = scoring
         df["season"] = season

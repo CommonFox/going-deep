@@ -35,15 +35,22 @@ function pair per table.
   extracts the `ecrData` JSON embedded in FantasyPros' rankings pages, since they don't offer a
   free public API. Set `current_week` in the module before running in-season.
 - `src/ffb/fftoday.py` — FFToday's own season-long fantasy point projections (standard/half-PPR/
-  PPR) by position. No auth required; parses the plain HTML projections table, since FFToday
-  doesn't offer an API. Rate-limits aggressive scraping, so requests are spaced out.
+  PPR) by position, including DST. No auth required; parses the plain HTML projections table,
+  since FFToday doesn't offer an API. Rate-limits aggressive scraping, so requests are spaced out.
 - `src/ffb/cbs.py` — CBS Sports' own season-long fantasy point projections (standard/PPR) by
-  position. No auth required; parses the plain HTML projections table, since CBS doesn't offer a
-  free API.
-- `src/ffb/consensus.py` — builds `consensus_projections`: a median/floor (20th percentile)/
-  ceiling (80th percentile) PPR projection per player, aggregated across every independent
-  projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS) via the nflverse player ID
-  crosswalk. Pure SQL over already-loaded tables — no fetch step, no network.
+  position, including DST. No auth required; parses the plain HTML projections table, since CBS
+  doesn't offer a free API.
+- `src/ffb/teams.py` — shared NFL team-abbreviation normalizer, not a data source itself. Each
+  projection site represents team defenses differently (a full name, a bare nickname, or a
+  non-canonical abbreviation like "LAR"); this maps any of those to the abbreviation nflverse
+  uses elsewhere in this warehouse (e.g. "LA" for the Rams), so DST rows can be joined by team.
+- `src/ffb/consensus.py` — builds two tables: `consensus_projections` (skill positions QB/RB/
+  WR/TE/K, joined via the nflverse player ID crosswalk onto `gsis_id`) and
+  `consensus_dst_projections` (team defenses, joined by normalized team abbreviation instead,
+  since defenses aren't in the player crosswalk). Each is a median/floor (20th percentile)/
+  ceiling (80th percentile) PPR projection per player or team, aggregated across every
+  independent projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS). Pure SQL over
+  already-loaded tables — no fetch step, no network.
 
 ## Environment
 
