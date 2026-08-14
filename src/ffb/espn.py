@@ -9,6 +9,8 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
+from src.ffb.teams import normalize_team
+
 load_dotenv()
 
 RAW_DIR = Path("data/raw/espn")
@@ -140,6 +142,55 @@ def load_player_ownership(raw_path: Path) -> None:
     _load_json_to_table(raw_path, "espn_player_ownership")
 
 
+# ESPN's numeric defaultPositionId, mapped to the position strings used elsewhere in this
+# warehouse (e.g. the nflverse `ids` crosswalk).
+POSITION_IDS = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DST"}
+
+
+def load_projections(raw_path: Path, season: int) -> None:
+    """Parse ESPN's own season-total point projection out of the player pool raw file.
+
+    Reuses the raw file already saved by fetch_player_ownership (no new network call) — each
+    player's `stats` list mixes actuals and projections across seasons/weeks, so we pick out
+    the season-total projection row (statSourceId=1, scoringPeriodId=0, seasonId=season).
+    """
+    players = json.loads(raw_path.read_text())
+
+    rows = []
+    for row in players:
+        player = row.get("player", {})
+        for stat in player.get("stats", []):
+            if (
+                stat.get("statSourceId") == 1
+                and stat.get("scoringPeriodId") == 0
+                and stat.get("seasonId") == season
+            ):
+                position = POSITION_IDS.get(player.get("defaultPositionId"))
+                full_name = player.get("fullName")
+                rows.append(
+                    {
+                        "espn_id": player.get("id"),
+                        "player_name": full_name,
+                        "position": position,
+                        # DST rows carry no useful proTeamId; derive the team abbreviation
+                        # from the name (e.g. "Texans D/ST") instead, for the team-based join
+                        # DST needs (no player ID crosswalk covers team defenses).
+                        "team": normalize_team(full_name) if position == "DST" else None,
+                        "season": season,
+                        "projected_points": stat.get("appliedTotal"),
+                    }
+                )
+                break
+
+    df = pd.DataFrame(rows)
+    WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.execute("CREATE OR REPLACE TABLE espn_projections AS SELECT * FROM df")
+    con.close()
+
+    print(f"Loaded {len(df)} rows into {WAREHOUSE_PATH} (table: espn_projections)")
+
+
 def fetch_transactions(league_id: str, season: int) -> Path:
     """Fetch waiver claims, trades, and adds/drops and save raw to JSON."""
     data = _get(_league_url(league_id, season), params={"view": "mTransactions2"})
@@ -166,6 +217,8 @@ if __name__ == "__main__":
     load_rosters(fetch_rosters(LEAGUE_ID, SEASON))
     load_matchups(fetch_matchups(LEAGUE_ID, SEASON))
     load_players(fetch_players(SEASON))
-    load_player_ownership(fetch_player_ownership(LEAGUE_ID, SEASON))
+    ownership_raw_path = fetch_player_ownership(LEAGUE_ID, SEASON)
+    load_player_ownership(ownership_raw_path)
+    load_projections(ownership_raw_path, SEASON)
     load_transactions(fetch_transactions(LEAGUE_ID, SEASON))
     load_boxscores(fetch_boxscores(LEAGUE_ID, SEASON))

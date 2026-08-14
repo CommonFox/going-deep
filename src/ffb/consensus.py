@@ -1,0 +1,139 @@
+"""Build the consensus (median/floor/ceiling) projection tables from every projection source.
+
+Pure warehouse-to-warehouse SQL — no fetch step, no network, just a transform over tables that
+the other source modules (espn, sleeper, fftoday, cbs) have already loaded.
+
+Two output tables, because team defenses need a different join key than individual players:
+- consensus_projections: skill positions (QB/RB/WR/TE/K), joined through the nflverse `ids`
+  player crosswalk (loaded by nfl_data.py) onto a common `gsis_id`.
+- consensus_dst_projections: team defenses, joined on a normalized team abbreviation (see
+  teams.py) instead, since `ids` is player-level and has no team-defense entries.
+"""
+
+from pathlib import Path
+
+import duckdb
+
+from src.ffb.teams import normalize_team
+
+WAREHOUSE_PATH = Path("data/warehouse.duckdb")
+
+_SKILL_POSITIONS = ("QB", "RB", "WR", "TE", "K")
+
+_PERCENTILE_AGGREGATES = """
+    COUNT(*) AS num_sources,
+    MIN(projected_points) AS min_points,
+    MAX(projected_points) AS max_points,
+    PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY projected_points) AS floor_p20,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY projected_points) AS median_p50,
+    PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY projected_points) AS ceiling_p80,
+    STDDEV(projected_points) AS stddev_points
+"""
+
+# Every join also matches on position, since the `ids` crosswalk has a handful of duplicate
+# external IDs among long-retired/free-agent players (verified harmless against current data —
+# none of them appear in any of the active-player projection sources below — but matching on
+# position too costs nothing and rules it out structurally rather than by luck). `ids` labels
+# kickers "PK" where every source here uses "K", so the crosswalk is normalized to "K" first.
+_BUILD_SQL = f"""
+CREATE OR REPLACE TABLE consensus_projections AS
+WITH ids_normalized AS (
+    SELECT gsis_id, name, espn_id, sleeper_id, cbs_id, merge_name,
+           CASE WHEN position = 'PK' THEN 'K' ELSE position END AS position
+    FROM ids
+),
+source_projections AS (
+    SELECT ids.gsis_id, ids.name AS player_name, ids.position, 'espn' AS source,
+           e.projected_points
+    FROM espn_projections e
+    JOIN ids_normalized ids ON ids.espn_id = e.espn_id AND ids.position = e.position
+
+    UNION ALL
+
+    SELECT ids.gsis_id, ids.name, ids.position, 'sleeper', SUM(s.pts_ppr)
+    FROM sleeper_projections s
+    JOIN ids_normalized ids
+        ON TRY_CAST(s.sleeper_id AS DOUBLE) = ids.sleeper_id AND ids.position = s.position
+    GROUP BY ids.gsis_id, ids.name, ids.position
+
+    UNION ALL
+
+    SELECT ids.gsis_id, ids.name, ids.position, 'cbs', c.projected_points
+    FROM cbs_projections c
+    JOIN ids_normalized ids ON ids.cbs_id = c.cbs_id AND ids.position = c.position
+    WHERE c.scoring = 'ppr'
+
+    UNION ALL
+
+    SELECT ids.gsis_id, ids.name, ids.position, 'fftoday', f.projected_points
+    FROM fftoday_projections f
+    JOIN ids_normalized ids ON ids.merge_name = f.merge_name AND ids.position = f.position
+    WHERE f.scoring = 'ppr'
+)
+SELECT
+    gsis_id,
+    ANY_VALUE(player_name) AS player_name,
+    ANY_VALUE(position) AS position,
+    {_PERCENTILE_AGGREGATES}
+FROM source_projections
+WHERE gsis_id IS NOT NULL
+    AND projected_points IS NOT NULL
+    AND position IN {_SKILL_POSITIONS}
+GROUP BY gsis_id
+"""
+
+# `team` values are normalized (via the normalize_team Python UDF registered below) before this
+# runs, since each source represents defenses differently — a full name, a bare nickname, or a
+# non-canonical abbreviation (e.g. "LAR" instead of this warehouse's "LA" for the Rams).
+_BUILD_DST_SQL = f"""
+CREATE OR REPLACE TABLE consensus_dst_projections AS
+WITH source_projections AS (
+    -- espn_projections.team is already normalized at load time (see espn.py:load_projections).
+    SELECT team, 'espn' AS source, projected_points
+    FROM espn_projections
+    WHERE position = 'DST'
+
+    UNION ALL
+
+    SELECT normalize_team(team), 'sleeper', SUM(pts_ppr)
+    FROM sleeper_projections
+    WHERE position = 'DEF'
+    GROUP BY team
+
+    UNION ALL
+
+    SELECT team, 'cbs', projected_points
+    FROM cbs_projections
+    WHERE position = 'DST' AND scoring = 'ppr'
+
+    UNION ALL
+
+    SELECT team, 'fftoday', projected_points
+    FROM fftoday_projections
+    WHERE position = 'DST' AND scoring = 'ppr'
+)
+SELECT
+    team,
+    {_PERCENTILE_AGGREGATES}
+FROM source_projections
+WHERE team IS NOT NULL AND projected_points IS NOT NULL
+GROUP BY team
+"""
+
+
+def build_consensus_projections() -> None:
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.create_function("normalize_team", normalize_team, ["VARCHAR"], "VARCHAR")
+
+    con.execute(_BUILD_SQL)
+    con.execute(_BUILD_DST_SQL)
+    (count,) = con.execute("SELECT COUNT(*) FROM consensus_projections").fetchone()
+    (dst_count,) = con.execute("SELECT COUNT(*) FROM consensus_dst_projections").fetchone()
+    con.close()
+
+    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: consensus_projections)")
+    print(f"Built {dst_count} rows into {WAREHOUSE_PATH} (table: consensus_dst_projections)")
+
+
+if __name__ == "__main__":
+    build_consensus_projections()

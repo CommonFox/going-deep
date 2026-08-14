@@ -11,9 +11,12 @@ import requests
 RAW_DIR = Path("data/raw/sleeper")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 BASE_URL = "https://api.sleeper.app/v1"
+PROJECTIONS_BASE_URL = "https://api.sleeper.app"
 
 # TODO: set this to your league's ID (the numeric ID in the league's Sleeper URL).
 LEAGUE_ID = "1390836961870090240"
+
+SEASON = 2026
 
 # Regular season + playoffs; trim if your league's schedule is shorter.
 WEEKS = list(range(1, 19))
@@ -152,6 +155,52 @@ def load_players(raw_path: Path) -> None:
     print(f"Loaded {raw_path} into {WAREHOUSE_PATH} (table: sleeper_players)")
 
 
+def fetch_projections(season: int, weeks: list[int]) -> Path:
+    """Fetch weekly player projections (public, not league-scoped) and save raw to JSON.
+
+    This is a different, unauthenticated Sleeper API surface (no /v1 prefix, no league ID) —
+    it's the feed Sleeper's own app uses to show projected points, sourced from RotoWire.
+    """
+    rows = []
+    for week in weeks:
+        response = requests.get(
+            f"{PROJECTIONS_BASE_URL}/projections/nfl/{season}/{week}",
+            params={"season_type": "regular"},
+        )
+        response.raise_for_status()
+        week_rows = response.json()
+        for row in week_rows:
+            row["week"] = week
+        rows.extend(week_rows)
+    return _save_raw_json(rows, f"projections_{season}")
+
+
+def load_projections(raw_path: Path) -> None:
+    data = json.loads(raw_path.read_text())
+    rows = [
+        {
+            "sleeper_id": row.get("player_id"),
+            "player_name": (row.get("player") or {}).get("first_name", "")
+            + " "
+            + (row.get("player") or {}).get("last_name", ""),
+            "position": (row.get("player") or {}).get("position"),
+            "team": row.get("team"),
+            "season": row.get("season"),
+            "week": row.get("week"),
+            "pts_ppr": (row.get("stats") or {}).get("pts_ppr"),
+        }
+        for row in data
+    ]
+    df = pd.DataFrame(rows)
+
+    WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.execute("CREATE OR REPLACE TABLE sleeper_projections AS SELECT * FROM df")
+    con.close()
+
+    print(f"Loaded {len(df)} rows into {WAREHOUSE_PATH} (table: sleeper_projections)")
+
+
 if __name__ == "__main__":
     load_league(fetch_league(LEAGUE_ID))
     load_rosters(fetch_rosters(LEAGUE_ID))
@@ -160,3 +209,4 @@ if __name__ == "__main__":
     load_transactions(fetch_transactions(LEAGUE_ID, WEEKS))
     load_nfl_state(fetch_nfl_state())
     load_players(fetch_players())
+    load_projections(fetch_projections(SEASON, WEEKS))
