@@ -126,6 +126,15 @@ network access of their own.
   filled from that pool regardless of position — so a position that wins more flex spots in a given
   season automatically gets a deeper replacement level, with no hardcoded split. Pure SQL/Python
   over already-loaded tables — no fetch step, no network.
+- `src/gold/boom_bust.py` — builds `boom_bust`: classifies each skill-position player-season into
+  a preseason-ADP-relative outcome bucket (Boomed/Returned on ADP/Fine/Busted/Got Injured/No
+  Preseason ADP), by converting both `points_over_replacement` and `adp_consensus`'s
+  `consensus_adp` into percentiles within the same season-position pool of ADP-tracked players, so
+  the comparison is scoring-format- and league-size-independent rather than a fixed PPG number or
+  ADP-spot count. Boom/Bust/Fine/Returned split at symmetric +/-20-percentile-point bands around
+  "met expectation"; fewer than 12 games played overrides those bands as Got Injured, but only for
+  players who had preseason draft capital to begin with. Pure SQL over already-loaded tables — no
+  fetch step, no network.
 
 ## Environment
 
