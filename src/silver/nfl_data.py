@@ -149,6 +149,19 @@ def load_ftn_data(raw_path: Path) -> None:
     _load_parquet_to_table(raw_path, "ftn_data")
 
 
+def fetch_pfr_advstats(stat_type: str, seasons: list[int]) -> Path:
+    """Fetch PFR advanced season-level stats (pass/rush/rec/def) and save raw to parquet.
+
+    Not available before 2018 (nfl_data_py raises if any requested season predates that).
+    """
+    df = nfl.import_seasonal_pfr(stat_type, seasons)
+    return _save_raw(df, f"pfr_advstats_{stat_type}_{_seasons_label(seasons)}")
+
+
+def load_pfr_advstats(raw_path: Path, stat_type: str) -> None:
+    _load_parquet_to_table(raw_path, f"pfr_advstats_{stat_type}")
+
+
 def fetch_ids() -> Path:
     """Fetch the cross-platform player ID crosswalk and save raw to parquet."""
     df = nfl.import_ids()
@@ -173,3 +186,6 @@ if __name__ == "__main__":
     load_players(fetch_players())
     load_ngs_data(fetch_ngs_data(seasons))
     load_ftn_data(fetch_ftn_data(seasons))
+
+    for stat_type in ["pass", "rush"]:
+        load_pfr_advstats(fetch_pfr_advstats(stat_type, seasons), stat_type)
