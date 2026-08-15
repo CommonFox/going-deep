@@ -138,6 +138,16 @@ network access of their own.
   "met expectation"; fewer than 12 games played overrides those bands as Got Injured, but only for
   players who had preseason draft capital to begin with. Pure SQL over already-loaded tables — no
   fetch step, no network.
+- `src/gold/breakout_candidates.py` — builds `breakout_candidates`: ranks `inhouse_projections`'
+  already-ADP-blind prediction into a position-relative percentile per target season and lines it
+  up against `adp_consensus`'s preseason percentile, so a player the model likes that the real-world
+  draft market doesn't (or hasn't seen at all — `consensus_adp` stays NULL rather than being
+  coerced to a default) shows up directly as a high `predicted_delta`. League-agnostic by design —
+  ranks `inhouse_projections`' raw PPG-based projection as-is rather than retraining against either
+  league's own scoring the way `points_over_replacement`/`boom_bust` do. No bucketing and no
+  games-played check the way `boom_bust` has, since both describe an *actual* outcome that, for the
+  live target season, hasn't happened yet — `predicted_delta` is left as a continuous score to
+  sort/filter directly. Pure SQL over already-loaded tables — no fetch step, no network.
 
 ## Environment
 
