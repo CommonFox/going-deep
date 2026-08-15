@@ -8,13 +8,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python -m src.ffb.nfl_data
-python -m src.ffb.sleeper
-python -m src.ffb.espn
-python -m src.ffb.fantasypros
-python -m src.ffb.fftoday
-python -m src.ffb.cbs
+python -m src.silver.nfl_data
+python -m src.silver.sleeper
+python -m src.silver.espn
+python -m src.silver.fantasypros
+python -m src.silver.fftoday
+python -m src.silver.cbs
 
 # Depends on every source above already being loaded (joins their projections through the
 # nflverse `ids` crosswalk from nfl_data.py).
-python -m src.ffb.consensus
+python -m src.gold.consensus

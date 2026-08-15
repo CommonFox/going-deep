@@ -14,37 +14,42 @@ Data flows through a raw-archive → DuckDB warehouse pipeline:
    single local DuckDB file. Loads are idempotent and never hit the network, so the warehouse can
    be rebuilt from the raw archive at any time, on any machine.
 
-Each data source gets its own module at `src/ffb/<source>.py`, exposing a `fetch_*`/`load_*`
-function pair per table.
+The `src/` layout follows a medallion-style split: `silver/` holds one module per raw data
+source, each exposing a `fetch_*`/`load_*` function pair per table; `gold/` holds modules built on
+top of already-loaded silver tables — proprietary/derived models with no fetch step and no
+network access of their own.
 
-## Data sources
+## Data sources (`src/silver/`)
 
-- `src/ffb/nfl_data.py` — nflverse data via `nfl_data_py`: weekly stats, schedules, rosters, snap
-  counts, injuries, seasonal data, depth charts, player bios, Next Gen Stats, FTN charting data,
-  and a cross-platform player ID crosswalk.
-- `src/ffb/sleeper.py` — Sleeper's public league API (no auth required): league settings, rosters,
-  users, weekly matchups (including starting lineups), transactions, current NFL state, and the
-  full player dictionary. Set `LEAGUE_ID` in the module before running.
-- `src/ffb/espn.py` — ESPN's fantasy API: league settings, teams, rosters, weekly matchups and
+- `src/silver/nfl_data.py` — nflverse data via `nfl_data_py`: weekly stats, schedules, rosters,
+  snap counts, injuries, seasonal data, depth charts, player bios, Next Gen Stats, FTN charting
+  data, and a cross-platform player ID crosswalk.
+- `src/silver/sleeper.py` — Sleeper's public league API (no auth required): league settings,
+  rosters, users, weekly matchups (including starting lineups), transactions, current NFL state,
+  and the full player dictionary. Set `LEAGUE_ID` in the module before running.
+- `src/silver/espn.py` — ESPN's fantasy API: league settings, teams, rosters, weekly matchups and
   boxscores, the player pool (with ownership %, ADP, and projections), and transactions. Private
   leagues require `ESPN_S2` and `SWID` cookies from a logged-in browser session, set via a
   gitignored `.env` file (see `.env.example`). Set `LEAGUE_ID` and `SEASON` in the module before
   running.
-- `src/ffb/fantasypros.py` — FantasyPros consensus expert rankings (ECR): preseason overall draft
-  rankings (standard/half-PPR/PPR) and in-season weekly rankings by position. No auth required;
-  extracts the `ecrData` JSON embedded in FantasyPros' rankings pages, since they don't offer a
-  free public API. Set `current_week` in the module before running in-season.
-- `src/ffb/fftoday.py` — FFToday's own season-long fantasy point projections (standard/half-PPR/
+- `src/silver/fantasypros.py` — FantasyPros consensus expert rankings (ECR): preseason overall
+  draft rankings (standard/half-PPR/PPR) and in-season weekly rankings by position. No auth
+  required; extracts the `ecrData` JSON embedded in FantasyPros' rankings pages, since they don't
+  offer a free public API. Set `current_week` in the module before running in-season.
+- `src/silver/fftoday.py` — FFToday's own season-long fantasy point projections (standard/half-PPR/
   PPR) by position, including DST. No auth required; parses the plain HTML projections table,
   since FFToday doesn't offer an API. Rate-limits aggressive scraping, so requests are spaced out.
-- `src/ffb/cbs.py` — CBS Sports' own season-long fantasy point projections (standard/PPR) by
+- `src/silver/cbs.py` — CBS Sports' own season-long fantasy point projections (standard/PPR) by
   position, including DST. No auth required; parses the plain HTML projections table, since CBS
   doesn't offer a free API.
-- `src/ffb/teams.py` — shared NFL team-abbreviation normalizer, not a data source itself. Each
+- `src/silver/teams.py` — shared NFL team-abbreviation normalizer, not a data source itself. Each
   projection site represents team defenses differently (a full name, a bare nickname, or a
   non-canonical abbreviation like "LAR"); this maps any of those to the abbreviation nflverse
   uses elsewhere in this warehouse (e.g. "LA" for the Rams), so DST rows can be joined by team.
-- `src/ffb/consensus.py` — builds two tables: `consensus_projections` (skill positions QB/RB/
+
+## Proprietary models (`src/gold/`)
+
+- `src/gold/consensus.py` — builds two tables: `consensus_projections` (skill positions QB/RB/
   WR/TE/K, joined via the nflverse player ID crosswalk onto `gsis_id`) and
   `consensus_dst_projections` (team defenses, joined by normalized team abbreviation instead,
   since defenses aren't in the player crosswalk). Each is a median/floor (20th percentile)/
@@ -66,7 +71,7 @@ pip install -r requirements.txt
 Run a source module directly to fetch and load its tables into the warehouse:
 
 ```bash
-python -m src.ffb.nfl_data
+python -m src.silver.nfl_data
 ```
 
 To rebuild the full warehouse from scratch (e.g. on a new machine), run every source in

@@ -14,7 +14,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from src.ffb.teams import normalize_team
+from src.silver.teams import normalize_team
 
 RAW_DIR = Path("data/raw/fftoday")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")

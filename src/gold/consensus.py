@@ -14,7 +14,7 @@ from pathlib import Path
 
 import duckdb
 
-from src.ffb.teams import normalize_team
+from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 

@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
-from src.ffb.teams import normalize_team
+from src.silver.teams import normalize_team
 
 load_dotenv()
 

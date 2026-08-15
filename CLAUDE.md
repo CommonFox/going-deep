@@ -21,20 +21,24 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
 
 ## Conventions
 
-- One module per data source at `src/ffb/<source>.py`, using plain functions (no classes unless
-  clearly justified).
-- Each table gets a `fetch_*`/`load_*` function pair:
-  - `fetch_*` pulls from the network and saves the raw, unparsed response to
-    `data/raw/<source>/...` (gitignored) as the source of truth.
-  - `load_*` reads a raw file and loads it into `data/warehouse.duckdb` (gitignored), idempotently
-    (e.g. `CREATE OR REPLACE TABLE ... AS SELECT * FROM read_parquet(...)`) and without ever
-    hitting the network, so the warehouse can be rebuilt from the raw archive alone.
+- `src/` follows a medallion-style split:
+  - `src/silver/<source>.py` — one module per raw data source, using plain functions (no classes
+    unless clearly justified). Each table gets a `fetch_*`/`load_*` function pair:
+    - `fetch_*` pulls from the network and saves the raw, unparsed response to
+      `data/raw/<source>/...` (gitignored) as the source of truth.
+    - `load_*` reads a raw file and loads it into `data/warehouse.duckdb` (gitignored),
+      idempotently (e.g. `CREATE OR REPLACE TABLE ... AS SELECT * FROM read_parquet(...)`) and
+      without ever hitting the network, so the warehouse can be rebuilt from the raw archive
+      alone.
+  - `src/gold/<model>.py` — proprietary/derived models built on top of already-loaded silver
+    tables (e.g. `consensus.py`). Pure SQL/Python over the warehouse — no fetch step, no network.
 - `if __name__ == "__main__":` in each source module runs the full fetch→load sequence for that
   source end to end.
 - One feature per branch, with frequent commits pushed to `origin` so work can resume from a
   different machine. Use conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, etc.) for
   commit subjects.
-- When adding a new data source, follow this same fetch/load split and folder layout rather than
+- When adding a new data source, add it under `src/silver/`; when adding a new derived/proprietary
+  model, add it under `src/gold/`. Follow the same fetch/load split and folder layout rather than
   inventing a new pattern.
 
 ## Working style
