@@ -60,6 +60,11 @@ network access of their own.
   offensive line grade from PFR's advanced pass/rush stats, combining pass-block (QB pressure
   rate allowed, weighted by pass attempts) and run-block (RB/FB yards before contact per rush
   attempt) into one score. Pure SQL over already-loaded tables — no fetch step, no network.
+- `src/gold/skill_position_grades.py` — builds `skill_position_grades`: a per-team-per-season
+  0-100 corps-strength grade for WR, TE, and RB, from nflverse Next Gen Stats "over expectation"
+  metrics (separation and YAC over expectation for WR/TE, rush yards over expectation for RB) so
+  the grade reflects talent rather than just recycling the volume/scoring this warehouse is
+  ultimately projecting. Pure SQL over already-loaded tables — no fetch step, no network.
 
 ## Environment
 
