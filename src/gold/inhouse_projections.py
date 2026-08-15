@@ -55,6 +55,14 @@ _FEATURE_COLUMNS = _BASE_FEATURES + [f"position_{p}" for p in _SKILL_POSITIONS]
 # there is.
 _MODEL_PARAMS = dict(max_depth=3, min_samples_leaf=15, learning_rate=0.1, random_state=0)
 
+# offensive_line_grades needs target_season - 1 >= 2018 (PFR advanced stats' own floor) before it
+# has any non-null values at all. Picking an earlier target_season as the single-season holdout
+# training slice would hand it a feature column that's 100% missing rather than just sparse, which
+# breaks HistGradientBoostingRegressor's binning outright. The final live-season model further
+# down still trains on every labeled season combined (pre-2019 ones included), since per-row (not
+# per-column) missingness there is exactly what skill_grade already looks like for every QB row.
+_MIN_TRAIN_SEASON_WITH_TEAM_CONTEXT = 2019
+
 # player_team resolves each player's most-played team in a season (mirrors the
 # team_by_player_season pattern in skill_position_grades.py, over weekly_stats instead of
 # ngs_data), so team context can be joined in as of target_season - 1.
@@ -129,12 +137,13 @@ def build_inhouse_projections() -> None:
     df = _add_position_dummies(df)
     labeled = df[df["actual_ppg_ppr"].notna()].sort_values("target_season")
     labeled_seasons = sorted(labeled["target_season"].unique())
+    trainable_seasons = [s for s in labeled_seasons if s >= _MIN_TRAIN_SEASON_WITH_TEAM_CONTEXT]
     live_season = df["target_season"].max()
 
     output_frames = []
 
-    if len(labeled_seasons) >= 2:
-        train_season, holdout_season = labeled_seasons[0], labeled_seasons[1]
+    if len(trainable_seasons) >= 2:
+        train_season, holdout_season = trainable_seasons[0], trainable_seasons[1]
         train = labeled[labeled["target_season"] == train_season]
         holdout = labeled[labeled["target_season"] == holdout_season].copy()
 
@@ -149,7 +158,7 @@ def build_inhouse_projections() -> None:
         )
         output_frames.append(holdout)
     else:
-        print("Fewer than 2 labeled seasons available — skipping holdout evaluation.")
+        print("Fewer than 2 trainable labeled seasons available — skipping holdout evaluation.")
 
     # Restrict live output to players who actually played in target_season - 1: without that,
     # a player with no data more recent than 2+ years back (e.g. a retiree like Tom Brady, whose
