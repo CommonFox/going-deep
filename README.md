@@ -73,6 +73,16 @@ network access of their own.
   `weighted_games_per_season`, the same recency-weighted average applied to games played instead —
   a durability signal. A feature-engineering building block, not a projection itself. Pure SQL
   over already-loaded tables — no fetch step, no network.
+- `src/gold/league_settings.py` — builds `league_settings`: one row per league (Sleeper, ESPN)
+  normalizing each platform's scoring rules (points per reception/yard/TD/turnover, etc.) and
+  starting-roster construction (team count and QB/RB/WR/TE/FLEX/superflex/bench/IR slot counts)
+  into a shared schema. Sleeper's settings arrive as flat columns; ESPN's arrive as a nested array
+  of `{statId, points}` items and a slot-id-keyed lineup dict, both keyed by undocumented numeric
+  IDs (mapped here using the cwendt94/espn-api project's reference tables, spot-checked against
+  this league's actual raw settings). Exists so scoring-sensitive models (e.g. league-winning-RB
+  thresholds, points-over-replacement) can run one formula per league and get a league-appropriate
+  number back instead of a constant tuned to one scoring format. Pure SQL/Python over already-
+  loaded tables — no fetch step, no network.
 - `src/gold/inhouse_projections.py` — builds `inhouse_projections`: a home-grown PPG projection
   from a gradient-boosted model (scikit-learn's `HistGradientBoostingRegressor`), trained on a
   shift-based setup — `player_weighted_baselines` plus prior-season `offensive_line_grades`/
