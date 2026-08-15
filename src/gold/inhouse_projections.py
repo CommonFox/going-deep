@@ -38,6 +38,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, r2_score
 
 from src.gold.player_baselines import _MIN_GAMES_PLAYED, _SKILL_POSITIONS
@@ -156,6 +157,21 @@ def build_inhouse_projections() -> None:
             f"evaluated out-of-sample on target_season={holdout_season} (n={len(holdout)}) "
             f"-> MAE={mae:.2f} R2={r2:.2f}"
         )
+
+        # Out-of-sample (on the holdout, not train) so a feature the model overfit to doesn't look
+        # important just because it memorized train-set noise. Answers "do the team-context signals
+        # (ol_grade/skill_grade) actually carry weight" rather than assuming they do because they're
+        # in the feature list.
+        importances = permutation_importance(
+            holdout_model, holdout[_FEATURE_COLUMNS], holdout["actual_ppg_ppr"],
+            n_repeats=20, random_state=0,
+        )
+        ranked_importances = sorted(
+            zip(_FEATURE_COLUMNS, importances.importances_mean), key=lambda x: -x[1]
+        )
+        importance_str = ", ".join(f"{name}={score:.3f}" for name, score in ranked_importances)
+        print(f"Permutation feature importance (mean R2 drop when shuffled): {importance_str}")
+
         output_frames.append(holdout)
     else:
         print("Fewer than 2 trainable labeled seasons available — skipping holdout evaluation.")

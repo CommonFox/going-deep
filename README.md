@@ -116,7 +116,10 @@ network access of their own.
   season-total point projection via the `weighted_games_per_season` durability signal. The only
   `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over already-loaded tables
   instead), and the only one with a genuine train/holdout split, printing out-of-sample MAE/R2 on
-  each run. Feeds into `consensus.py` as a fifth projection source.
+  each run, alongside out-of-sample permutation feature importance — which preseason signals
+  (recency-weighted history, durability, OL/skill-position grades) actually move the prediction,
+  not just which ones are in the feature list. Feeds into `consensus.py` as a fifth projection
+  source.
 - `src/gold/points_over_replacement.py` — builds `points_over_replacement`: each skill-position
   player's season-total fantasy points, recomputed from nflverse weekly stats under each league's
   own `league_settings` scoring coefficients (not nflverse's canned PPR formula), minus that
