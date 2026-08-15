@@ -3,6 +3,9 @@ warehouse (e.g. the `rosters` table) — "LA" (not "LAR") for the Rams, "JAX" (n
 Jaguars. Projection sources represent team defenses inconsistently (full team names, bare
 nicknames, or a divergent abbreviation), so `normalize_team` maps any of those down to the
 canonical abbreviation, for joining DST rows across sources by team instead of a player ID.
+
+Relocated franchises fold into their current abbreviation (a 2018 "OAK" row normalizes to "LV"),
+so a franchise joins to itself across seasons that straddle its move.
 """
 
 NICKNAME_TO_ABBR = {
@@ -19,6 +22,13 @@ NICKNAME_TO_ABBR = {
 ABBR_ALIASES = {
     "LAR": "LA", "JAC": "JAX", "WSH": "WAS", "GNB": "GB", "NOR": "NO",
     "SFO": "SF", "TAM": "TB", "NWE": "NE", "KAN": "KC", "LVR": "LV",
+    "ARZ": "ARI", "BLT": "BAL", "CLV": "CLE", "HST": "HOU",
+    # Relocations, mapped to the franchise's current abbreviation so a team joins to itself across
+    # its move: a 2018 "OAK" row is the same O-line/roster lineage as a 2024 "LV" one. Sources
+    # disagree about which era's code to use for old seasons (PFR's advstats_pass says "OAK" for
+    # 2018-19 while advstats_rush says "LV"), so without these a join across two such tables
+    # silently drops the franchise instead of matching it.
+    "OAK": "LV", "SD": "LAC", "SDG": "LAC", "STL": "LA", "SL": "LA",
 }  # fmt: skip
 
 
