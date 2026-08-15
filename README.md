@@ -35,7 +35,20 @@ network access of their own.
 - `src/silver/fantasypros.py` — FantasyPros consensus expert rankings (ECR): preseason overall
   draft rankings (standard/half-PPR/PPR) and in-season weekly rankings by position. No auth
   required; extracts the `ecrData` JSON embedded in FantasyPros' rankings pages, since they don't
-  offer a free public API. Set `current_week` in the module before running in-season.
+  offer a free public API. Set `current_week` in the module before running in-season. Also loads
+  `fantasypros_adp`: historical average draft position by season, from CSVs manually downloaded
+  from FantasyPros' ADP page (a client-rendered app with no embeddable data, unlike the rankings
+  pages) and dropped into `data/raw/fantasypros/` — the one silver table in this warehouse with a
+  human "fetch" step instead of a network call. `team`/`bye` reflect the player's team as of
+  whenever the CSV was downloaded, not their actual historical team that season, and are sparse
+  for older seasons (FantasyPros' own archive quality); the ADP rank/value itself is genuine
+  historical data.
+- `src/silver/fantasyfootballcalculator.py` — FantasyFootballCalculator's historical ADP by
+  scoring format (standard/half-PPR/PPR) and season, back to 2015, via FFC's free public JSON API.
+  No auth required. FFC's `teams` query parameter is cosmetic — verified it returns identical
+  underlying ADP values regardless of team count — so this is one pooled dataset per format/season,
+  not genuinely split by league size. A second, independent ADP source alongside
+  `fantasypros_adp`, so no single source's platform-specific bias dominates.
 - `src/silver/fftoday.py` — FFToday's own season-long fantasy point projections (standard/half-PPR/
   PPR) by position, including DST. No auth required; parses the plain HTML projections table,
   since FFToday doesn't offer an API. Rate-limits aggressive scraping, so requests are spaced out.
@@ -46,6 +59,10 @@ network access of their own.
   projection site represents team defenses differently (a full name, a bare nickname, or a
   non-canonical abbreviation like "LAR"); this maps any of those to the abbreviation nflverse
   uses elsewhere in this warehouse (e.g. "LA" for the Rams), so DST rows can be joined by team.
+- `src/silver/players.py` — shared player-name normalizer, not a data source itself. Reproduces
+  nflverse's own `merge_name` convention (lowercase, strip punctuation/suffixes) closely enough to
+  join FantasyPros'/FFC's free-text ADP names onto the `ids` crosswalk's `merge_name`, for sources
+  that carry no platform ID the crosswalk already knows.
 
 ## Proprietary models (`src/gold/`)
 
@@ -56,6 +73,15 @@ network access of their own.
   ceiling (80th percentile) PPR projection per player or team, aggregated across every
   independent projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS) plus the in-house
   model below. Pure SQL over already-loaded tables — no fetch step, no network.
+- `src/gold/adp_consensus.py` — builds `adp_consensus`: a consensus average draft position per
+  player-season (QB/RB/WR/TE), blending `fantasypros_adp` and `ffc_adp` (FantasyFootballCalculator,
+  PPR format) onto a shared `gsis_id` via the `merge_name` normalization in `players.py`, since
+  neither ADP source carries a platform ID the nflverse crosswalk already knows the way ESPN/
+  Sleeper/CBS projections do in `consensus.py`. Each site counts as one vote regardless of how many
+  scoring formats it offers — FFC's standard/half-PPR numbers are kept as their own columns for
+  reference but excluded from the blend, so one site's multiple formats can't outvote the other
+  site's single blended number. Pure SQL/Python over already-loaded tables — no fetch step, no
+  network.
 - `src/gold/offensive_line.py` — builds `offensive_line_grades`: a per-team-per-season 0-100
   offensive line grade from PFR's advanced pass/rush stats, combining pass-block (QB pressure
   rate allowed, weighted by pass attempts) and run-block (RB/FB yards before contact per rush

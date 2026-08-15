@@ -84,6 +84,57 @@ def load_weekly_rankings(raw_path: Path, position: str) -> None:
     _load_json_to_table(raw_path, f"fantasypros_weekly_rankings_{position}")
 
 
+# FantasyPros' historical ADP-by-year page is a client-rendered app with no server-embedded data
+# (unlike the rankings pages above), so there's no clean fetch_* for it. Instead this reads
+# manually-exported CSVs the user downloads by hand from fantasypros.com/nfl/adp/overall.php and
+# drops into RAW_DIR as `FantasyPros_<year>_Overall_ADP_Rankings.csv` — same raw-archive/load split
+# as everywhere else, just with a human doing the "fetch" step instead of a network call.
+_ADP_FILENAME_RE = re.compile(r"FantasyPros_(\d{4})_Overall_ADP_Rankings\.csv")
+
+# "Player (Bye)" packs name/team/bye into one string with an irregular format: team+bye are
+# omitted entirely for a large fraction of rows (most common in FantasyPros' older archives —
+# ~90% of 2015 rows have no team/bye at all, dropping to ~5-20% by the mid-2020s), and DST rows
+# spell out the full team name with no separate abbreviation token before the bye.
+_PLAYER_BYE_RE = re.compile(r"^(?P<name>.+?)(?:\s{2,}(?:(?P<team>[A-Z]{2,3})\s)?\((?P<bye>\d+)\))?$")
+
+# "POS" is normally a position + positional rank (e.g. "RB1"), but a handful of IDP-style rows
+# (OL/CB/LB) carry just the bare position with no rank suffix.
+_POSITION_RE = re.compile(r"^([A-Z]+?)(\d+)?$")
+
+
+def load_adp_manual(raw_dir: Path = RAW_DIR) -> None:
+    """Parse every manually-downloaded ADP CSV in raw_dir into one combined table (no network)."""
+    frames = []
+    for raw_path in sorted(raw_dir.glob("FantasyPros_*_Overall_ADP_Rankings.csv")):
+        match = _ADP_FILENAME_RE.fullmatch(raw_path.name)
+        if not match:
+            continue
+        season = int(match.group(1))
+
+        df = pd.read_csv(raw_path)
+        parsed_name = df["Player (Bye)"].str.extract(_PLAYER_BYE_RE)
+        parsed_pos = df["POS"].str.extract(_POSITION_RE)
+
+        frames.append(pd.DataFrame({
+            "season": season,
+            "rank": df["Rank"],
+            "name": parsed_name["name"],
+            "team": parsed_name["team"],
+            "bye": pd.to_numeric(parsed_name["bye"]),
+            "position": parsed_pos[0],
+            "position_rank": pd.to_numeric(parsed_pos[1]),
+            "adp": df["AVG"],
+        }))
+
+    df = pd.concat(frames, ignore_index=True)
+    WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.execute("CREATE OR REPLACE TABLE fantasypros_adp AS SELECT * FROM df")
+    con.close()
+
+    print(f"Loaded {len(df)} rows from {len(frames)} files into {WAREHOUSE_PATH} (table: fantasypros_adp)")
+
+
 if __name__ == "__main__":
     current_week = 1
 
