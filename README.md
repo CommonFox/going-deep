@@ -65,6 +65,13 @@ network access of their own.
   metrics (separation and YAC over expectation for WR/TE, rush yards over expectation for RB) so
   the grade reflects talent rather than just recycling the volume/scoring this warehouse is
   ultimately projecting. Pure SQL over already-loaded tables — no fetch step, no network.
+- `src/gold/player_baselines.py` — builds `player_weighted_baselines`: a per-player,
+  per-target-season PPR points-per-game baseline (QB/RB/WR/TE) from nflverse weekly stats, looking
+  back up to 4 seasons and weighting more recent seasons more heavily (1.0/0.9/0.8/0.7). A season
+  only counts toward the baseline if the player played at least 6 games in it, so an
+  injury-shortened or backup-role cameo doesn't distort the per-game rate. A feature-engineering
+  building block, not a projection itself — meant to feed a future in-house predictive model. Pure
+  SQL over already-loaded tables — no fetch step, no network.
 
 ## Environment
 
