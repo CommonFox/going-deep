@@ -1,11 +1,14 @@
 """Build the consensus (median/floor/ceiling) projection tables from every projection source.
 
 Pure warehouse-to-warehouse SQL — no fetch step, no network, just a transform over tables that
-the other source modules (espn, sleeper, fftoday, cbs) have already loaded.
+the other source modules (espn, sleeper, fftoday, cbs) and the in-house model
+(inhouse_projections.py) have already loaded/built.
 
 Two output tables, because team defenses need a different join key than individual players:
 - consensus_projections: skill positions (QB/RB/WR/TE/K), joined through the nflverse `ids`
-  player crosswalk (loaded by nfl_data.py) onto a common `gsis_id`.
+  player crosswalk (loaded by nfl_data.py) onto a common `gsis_id`. inhouse_projections is the one
+  exception — it's already keyed on that same `gsis_id` (it's built from weekly_stats, which uses
+  the same nflverse GSIS ID space), so it's unioned in directly with no crosswalk join.
 - consensus_dst_projections: team defenses, joined on a normalized team abbreviation (see
   teams.py) instead, since `ids` is player-level and has no team-defense entries.
 """
@@ -69,6 +72,16 @@ source_projections AS (
     FROM fftoday_projections f
     JOIN ids_normalized ids ON ids.merge_name = f.merge_name AND ids.position = f.position
     WHERE f.scoring = 'ppr'
+
+    UNION ALL
+
+    -- No ids crosswalk join here (see module docstring) and no position-matching safety net
+    -- either — that guards against ids' duplicate-external-ID problem, which doesn't apply since
+    -- this source never goes through ids at all. Scoped to the live target_season, i.e. the one
+    -- cohort inhouse_projections.py actually predicts (rather than backtests).
+    SELECT player_id, player_name, position, 'inhouse', projected_points
+    FROM inhouse_projections
+    WHERE target_season = (SELECT MAX(target_season) FROM inhouse_projections)
 )
 SELECT
     gsis_id,
