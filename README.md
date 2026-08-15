@@ -23,7 +23,7 @@ network access of their own.
 
 - `src/silver/nfl_data.py` — nflverse data via `nfl_data_py`: weekly stats, schedules, rosters,
   snap counts, injuries, seasonal data, depth charts, player bios, Next Gen Stats, FTN charting
-  data, and a cross-platform player ID crosswalk.
+  data, PFR advanced pass/rush stats, and a cross-platform player ID crosswalk.
 - `src/silver/sleeper.py` — Sleeper's public league API (no auth required): league settings,
   rosters, users, weekly matchups (including starting lineups), transactions, current NFL state,
   and the full player dictionary. Set `LEAGUE_ID` in the module before running.
@@ -56,6 +56,10 @@ network access of their own.
   ceiling (80th percentile) PPR projection per player or team, aggregated across every
   independent projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS). Pure SQL over
   already-loaded tables — no fetch step, no network.
+- `src/gold/offensive_line.py` — builds `offensive_line_grades`: a per-team-per-season 0-100
+  offensive line grade from PFR's advanced pass/rush stats, combining pass-block (QB pressure
+  rate allowed, weighted by pass attempts) and run-block (RB/FB yards before contact per rush
+  attempt) into one score. Pure SQL over already-loaded tables — no fetch step, no network.
 - `src/gold/skill_position_grades.py` — builds `skill_position_grades`: a per-team-per-season
   0-100 corps-strength grade for WR, TE, and RB, from nflverse Next Gen Stats "over expectation"
   metrics (separation and YAC over expectation for WR/TE, rush yards over expectation for RB) so
