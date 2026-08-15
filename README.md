@@ -72,7 +72,11 @@ network access of their own.
   since defenses aren't in the player crosswalk). Each is a median/floor (20th percentile)/
   ceiling (80th percentile) PPR projection per player or team, aggregated across every
   independent projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS) plus the in-house
-  model below. Pure SQL over already-loaded tables — no fetch step, no network.
+  model below. The in-house model's contribution is scoped to the season the other four sources
+  actually represent (derived from their own data), not its own most-recent `target_season` —
+  nflverse-fed `inhouse_projections` can lag the external sites' current-season projections, so a
+  stale in-house number drops out of the blend instead of silently mixing with four current ones.
+  Pure SQL over already-loaded tables — no fetch step, no network.
 - `src/gold/adp_consensus.py` — builds `adp_consensus`: a consensus average draft position per
   player-season (QB/RB/WR/TE), blending `fantasypros_adp` and `ffc_adp` (FantasyFootballCalculator,
   PPR format) onto a shared `gsis_id` via the `merge_name` normalization in `players.py`, since
