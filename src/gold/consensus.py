@@ -11,6 +11,14 @@ Two output tables, because team defenses need a different join key than individu
   the same nflverse GSIS ID space), so it's unioned in directly with no crosswalk join.
 - consensus_dst_projections: team defenses, joined on a normalized team abbreviation (see
   teams.py) instead, since `ids` is player-level and has no team-defense entries.
+
+inhouse_projections can lag behind the other four sources: its prior-year feature data comes from
+nflverse, which publishes noticeably slower than the external sites' own current-season
+projections, so its latest `target_season` isn't guaranteed to be the season the other four
+sources actually represent. consensus_projections' inhouse arm is scoped to that season (derived
+from the external sources themselves), not inhouse's own `MAX(target_season)` — otherwise a stale
+inhouse projection would get silently blended in alongside four current ones under the same
+player, dragging the consensus toward last season's number with no signal that anything was off.
 """
 
 from pathlib import Path
@@ -45,6 +53,20 @@ WITH ids_normalized AS (
            CASE WHEN position = 'PK' THEN 'K' ELSE position END AS position
     FROM ids
 ),
+-- The season the other four sources actually represent (sleeper_projections.season is text,
+-- everyone else's is already numeric) — see module docstring for why inhouse_projections is
+-- matched against this instead of its own MAX(target_season).
+current_season AS (
+    SELECT MAX(season) AS season FROM (
+        SELECT MAX(season) AS season FROM espn_projections
+        UNION ALL
+        SELECT MAX(TRY_CAST(season AS BIGINT)) AS season FROM sleeper_projections
+        UNION ALL
+        SELECT MAX(season) AS season FROM cbs_projections
+        UNION ALL
+        SELECT MAX(season) AS season FROM fftoday_projections
+    )
+),
 source_projections AS (
     SELECT ids.gsis_id, ids.name AS player_name, ids.position, 'espn' AS source,
            e.projected_points
@@ -77,11 +99,12 @@ source_projections AS (
 
     -- No ids crosswalk join here (see module docstring) and no position-matching safety net
     -- either — that guards against ids' duplicate-external-ID problem, which doesn't apply since
-    -- this source never goes through ids at all. Scoped to the live target_season, i.e. the one
-    -- cohort inhouse_projections.py actually predicts (rather than backtests).
+    -- this source never goes through ids at all. Scoped to current_season, not inhouse's own
+    -- MAX(target_season) — if inhouse hasn't caught up to the season the other sources represent,
+    -- it drops out of the blend entirely rather than contributing a stale number.
     SELECT player_id, player_name, position, 'inhouse', projected_points
     FROM inhouse_projections
-    WHERE target_season = (SELECT MAX(target_season) FROM inhouse_projections)
+    WHERE target_season = (SELECT season FROM current_season)
 )
 SELECT
     gsis_id,
