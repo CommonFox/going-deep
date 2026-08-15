@@ -62,6 +62,11 @@ def load_schedules(raw_path: Path) -> None:
 def fetch_rosters(seasons: list[int]) -> Path:
     """Fetch weekly rosters for the given seasons and save raw to parquet."""
     df = nfl.import_weekly_rosters(seasons)
+    # nflverse published jersey_number/draft_number as strings in some seasons and floats in
+    # others; concatenated across seasons that's a mixed-type object column, which fastparquet
+    # can't serialize. Coercing to a single numeric type resolves it without touching other columns.
+    for column in ("jersey_number", "draft_number"):
+        df[column] = pd.to_numeric(df[column], errors="coerce")
     return _save_raw(df, f"rosters_{_seasons_label(seasons)}")
 
 
@@ -120,7 +125,11 @@ def load_players(raw_path: Path) -> None:
 
 
 def fetch_ngs_data(seasons: list[int]) -> Path:
-    """Fetch seasonal Next Gen Stats (passing, receiving, rushing) and save raw to parquet."""
+    """Fetch seasonal Next Gen Stats (passing, receiving, rushing) and save raw to parquet.
+
+    NGS tracking data is only available from 2016 onward; earlier seasons are dropped.
+    """
+    seasons = [s for s in seasons if s >= 2016]
     stat_types = ["passing", "receiving", "rushing"]
     frames = []
     for stat_type in stat_types:
@@ -142,6 +151,9 @@ def fetch_ftn_data(seasons: list[int]) -> Path:
     """
     seasons = [s for s in seasons if s >= 2022]
     df = nfl.import_ftn_data(seasons)
+    # Same cross-season dtype inconsistency as rosters' jersey_number/draft_number, this time
+    # bool in some seasons' files and float in others.
+    df["is_trick_play"] = df["is_trick_play"].astype(float)
     return _save_raw(df, f"ftn_{_seasons_label(seasons)}")
 
 
@@ -152,8 +164,10 @@ def load_ftn_data(raw_path: Path) -> None:
 def fetch_pfr_advstats(stat_type: str, seasons: list[int]) -> Path:
     """Fetch PFR advanced season-level stats (pass/rush/rec/def) and save raw to parquet.
 
-    Not available before 2018 (nfl_data_py raises if any requested season predates that).
+    Not available before 2018 (nfl_data_py raises if any requested season predates that); earlier
+    seasons are dropped.
     """
+    seasons = [s for s in seasons if s >= 2018]
     df = nfl.import_seasonal_pfr(stat_type, seasons)
     return _save_raw(df, f"pfr_advstats_{stat_type}_{_seasons_label(seasons)}")
 
@@ -173,7 +187,13 @@ def load_ids(raw_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    seasons = list(range(2021, 2024))
+    # 2015-2024: enough draft classes for recency-weighted backtesting while staying in the
+    # modern pass-heavy/PPR era. 2025 is excluded even though it's been played — nflverse hasn't
+    # published its weekly/seasonal player-stats release for that season yet (schedules, rosters,
+    # snap counts, injuries, and depth charts are all already available for 2025, but a season
+    # with no fantasy-points outcome data isn't useful here, so it's left out entirely for
+    # consistency). 2026 is excluded since it hasn't been played yet.
+    seasons = list(range(2015, 2025))
 
     load_weekly_stats(fetch_weekly_stats(seasons))
     load_schedules(fetch_schedules(seasons))
