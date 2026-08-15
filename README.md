@@ -117,6 +117,15 @@ network access of their own.
   `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over already-loaded tables
   instead), and the only one with a genuine train/holdout split, printing out-of-sample MAE/R2 on
   each run. Feeds into `consensus.py` as a fifth projection source.
+- `src/gold/points_over_replacement.py` — builds `points_over_replacement`: each skill-position
+  player's season-total fantasy points, recomputed from nflverse weekly stats under each league's
+  own `league_settings` scoring coefficients (not nflverse's canned PPR formula), minus that
+  league-season-position's replacement level. Replacement level is a combined-flex-pool
+  Value-Based-Drafting calculation: dedicated starters (`team_count x slots`) are filled first per
+  position, then whatever's left over from RB/WR/TE is pooled, ranked by points, and FLEX slots are
+  filled from that pool regardless of position — so a position that wins more flex spots in a given
+  season automatically gets a deeper replacement level, with no hardcoded split. Pure SQL/Python
+  over already-loaded tables — no fetch step, no network.
 
 ## Environment
 
