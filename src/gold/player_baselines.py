@@ -12,6 +12,11 @@ plenty of one-game cameo rows (a Week 18 call-up, a player who tore an ACL in We
 those set a full-weight per-game rate would badly distort the baseline rather than just add noise
 to it.
 
+Alongside the PPG baseline, also outputs a `weighted_games_per_season` durability signal — the
+same recency-weighted average, but of games played rather than points per game — since a player's
+expected next-season games played is itself a useful feature (workload correlates with role) and
+the multiplier needed to turn a PPG prediction into a season-total point projection.
+
 This is a feature-engineering building block, not a projection itself — it's meant to feed a
 future in-house predictive model (prior-year weighted baseline + team context -> next-year PPG).
 """
@@ -92,7 +97,8 @@ SELECT
     m.position,
     COUNT(*) AS seasons_used,
     SUM(h.games_played) AS games_used,
-    SUM(h.ppg_ppr * h.recency_weight) / SUM(h.recency_weight) AS weighted_ppg_ppr
+    SUM(h.ppg_ppr * h.recency_weight) / SUM(h.recency_weight) AS weighted_ppg_ppr,
+    SUM(h.games_played * h.recency_weight) / SUM(h.recency_weight) AS weighted_games_per_season
 FROM history h
 JOIN most_recent_season m
     ON m.target_season = h.target_season AND m.player_id = h.player_id AND m.rn = 1

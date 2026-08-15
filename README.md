@@ -54,8 +54,8 @@ network access of their own.
   `consensus_dst_projections` (team defenses, joined by normalized team abbreviation instead,
   since defenses aren't in the player crosswalk). Each is a median/floor (20th percentile)/
   ceiling (80th percentile) PPR projection per player or team, aggregated across every
-  independent projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS). Pure SQL over
-  already-loaded tables — no fetch step, no network.
+  independent projection source above (ESPN, Sleeper/RotoWire, FFToday, CBS) plus the in-house
+  model below. Pure SQL over already-loaded tables — no fetch step, no network.
 - `src/gold/offensive_line.py` — builds `offensive_line_grades`: a per-team-per-season 0-100
   offensive line grade from PFR's advanced pass/rush stats, combining pass-block (QB pressure
   rate allowed, weighted by pass attempts) and run-block (RB/FB yards before contact per rush
@@ -69,9 +69,18 @@ network access of their own.
   per-target-season PPR points-per-game baseline (QB/RB/WR/TE) from nflverse weekly stats, looking
   back up to 4 seasons and weighting more recent seasons more heavily (1.0/0.9/0.8/0.7). A season
   only counts toward the baseline if the player played at least 6 games in it, so an
-  injury-shortened or backup-role cameo doesn't distort the per-game rate. A feature-engineering
-  building block, not a projection itself — meant to feed a future in-house predictive model. Pure
-  SQL over already-loaded tables — no fetch step, no network.
+  injury-shortened or backup-role cameo doesn't distort the per-game rate. Also outputs
+  `weighted_games_per_season`, the same recency-weighted average applied to games played instead —
+  a durability signal. A feature-engineering building block, not a projection itself. Pure SQL
+  over already-loaded tables — no fetch step, no network.
+- `src/gold/inhouse_projections.py` — builds `inhouse_projections`: a home-grown PPG projection
+  from a gradient-boosted model (scikit-learn's `HistGradientBoostingRegressor`), trained on a
+  shift-based setup — `player_weighted_baselines` plus prior-season `offensive_line_grades`/
+  `skill_position_grades` as features, actual next-season PPG as the label — then converted to a
+  season-total point projection via the `weighted_games_per_season` durability signal. The only
+  `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over already-loaded tables
+  instead), and the only one with a genuine train/holdout split, printing out-of-sample MAE/R2 on
+  each run. Feeds into `consensus.py` as a fifth projection source.
 
 ## Environment
 

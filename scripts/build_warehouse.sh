@@ -15,6 +15,12 @@ python -m src.silver.fantasypros
 python -m src.silver.fftoday
 python -m src.silver.cbs
 
-# Depends on every source above already being loaded (joins their projections through the
-# nflverse `ids` crosswalk from nfl_data.py).
+# Gold layer, in dependency order: the team-context grades and player baseline are pure
+# transforms of nfl_data.py's tables; inhouse_projections depends on all three of those; consensus
+# depends on every source above (external sites joined through the nflverse `ids` crosswalk,
+# inhouse_projections joined directly since it's already keyed on that same ID space).
+python -m src.gold.offensive_line
+python -m src.gold.skill_position_grades
+python -m src.gold.player_baselines
+python -m src.gold.inhouse_projections
 python -m src.gold.consensus
