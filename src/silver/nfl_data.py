@@ -122,6 +122,10 @@ def load_injuries(raw_path: Path) -> None:
 # and src/gold/depth_charts.py reconciles them into one weekly view.
 _DEPTH_CHART_SCHEMA_BREAK = 2025
 
+# The season the models project: not yet played, so it has no stats, but its schedule and
+# depth charts are already published. Bump this once a year.
+_UPCOMING_SEASON = 2026
+
 
 def fetch_depth_charts(seasons: list[int]) -> Path:
     """Fetch legacy per-week depth charts (pre-2025 format) and save raw to parquet."""
@@ -224,20 +228,37 @@ def load_ids(raw_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    # 2015-2025: enough draft classes for recency-weighted backtesting while staying in the modern
-    # pass-heavy/PPR era. 2025 was previously excluded on the belief that nflverse hadn't published
-    # its player stats yet; in fact nflverse had moved them to the `stats_player` release and
-    # nfl_data_py was still asking for the retired one (see _STATS_PLAYER_URL). 2026 is excluded
-    # since it hasn't been played yet — it's the season the models project, not train on.
-    seasons = list(range(2015, 2026))
+    # 2015 onward: enough draft classes for recency-weighted backtesting while staying in the
+    # modern pass-heavy/PPR era. 2025 was previously excluded on the belief that nflverse hadn't
+    # published its player stats yet; in fact nflverse had moved them to the `stats_player` release
+    # and nfl_data_py was still asking for the retired one (see _STATS_PLAYER_URL).
+    #
+    # Bump _UPCOMING_SEASON once a year, after the last one has been played out.
+    played_seasons = list(range(2015, _UPCOMING_SEASON))
 
-    load_weekly_stats(fetch_weekly_stats(seasons))
-    load_schedules(fetch_schedules(seasons))
-    load_rosters(fetch_rosters(seasons))
-    load_snap_counts(fetch_snap_counts(seasons))
-    load_injuries(fetch_injuries(seasons))
-    load_depth_charts(fetch_depth_charts(seasons))
-    load_depth_chart_snapshots(fetch_depth_chart_snapshots(seasons))
+    # Three of these feeds describe a season *before* it's played rather than after, and the
+    # upcoming season is exactly the one the models project — so they're fetched a year further
+    # forward than everything else. The schedule is published in May; depth-chart snapshots run
+    # from the March after the previous season right through the summer, which is what lets
+    # inhouse_projections know who is actually starting for the season it's projecting rather than
+    # inferring role from last year's box scores; and preseason rosters carry `draft_number` and
+    # `years_exp`, which is how the rookie arm gets draft capital and identifies a first-season
+    # player at all. Every other feed here is a record of games already played, and asking for a
+    # season that hasn't happened returns nothing.
+    #
+    # Rosters specifically: the `players` release is the more natural home for draft capital, but
+    # nflverse publishes it there on a long lag — as of the 2026 preseason it still had no 2026
+    # draft class at all, while the roster feed already carried the full board. Reading draft
+    # capital from rosters is what makes the rookie arm work in the season it's needed.
+    forward_looking_seasons = played_seasons + [_UPCOMING_SEASON]
+
+    load_weekly_stats(fetch_weekly_stats(played_seasons))
+    load_schedules(fetch_schedules(forward_looking_seasons))
+    load_rosters(fetch_rosters(forward_looking_seasons))
+    load_snap_counts(fetch_snap_counts(played_seasons))
+    load_injuries(fetch_injuries(played_seasons))
+    load_depth_charts(fetch_depth_charts(played_seasons))
+    load_depth_chart_snapshots(fetch_depth_chart_snapshots(forward_looking_seasons))
     load_ids(fetch_ids())
     load_players(fetch_players())
     load_ngs_data(fetch_ngs_data(seasons))
