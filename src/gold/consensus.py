@@ -41,6 +41,23 @@ _PERCENTILE_AGGREGATES = """
     STDDEV(projected_points) AS stddev_points
 """
 
+# The blend alone can't be interrogated: a median tells you nothing about whether the sources agree
+# or whether one outlier is dragging it, and answering "what does our own model say versus the
+# external sites" otherwise means re-querying four or five tables by hand through three different
+# ID crosswalks. Each source contributes at most one row per player/team, so MAX() FILTER is an
+# exact pivot rather than a silent pick-one. A NULL column means that source didn't project the
+# player at all, which is itself worth seeing — it's how the in-house arm reads whenever it hasn't
+# caught up to the season the external sites are on.
+_PLAYER_SOURCES = ("espn", "sleeper", "cbs", "fftoday", "inhouse")
+_DST_SOURCES = ("espn", "sleeper", "cbs", "fftoday")
+
+
+def _per_source_columns(sources: tuple[str, ...]) -> str:
+    return ",\n".join(
+        f"    MAX(projected_points) FILTER (WHERE source = '{source}') AS {source}_points"
+        for source in sources
+    )
+
 # Every join also matches on position, since the `ids` crosswalk has a handful of duplicate
 # external IDs among long-retired/free-agent players (verified harmless against current data —
 # none of them appear in any of the active-player projection sources below — but matching on
@@ -110,7 +127,8 @@ SELECT
     gsis_id,
     ANY_VALUE(player_name) AS player_name,
     ANY_VALUE(position) AS position,
-    {_PERCENTILE_AGGREGATES}
+    {_PERCENTILE_AGGREGATES},
+{_per_source_columns(_PLAYER_SOURCES)}
 FROM source_projections
 WHERE gsis_id IS NOT NULL
     AND projected_points IS NOT NULL
@@ -150,7 +168,8 @@ WITH source_projections AS (
 )
 SELECT
     team,
-    {_PERCENTILE_AGGREGATES}
+    {_PERCENTILE_AGGREGATES},
+{_per_source_columns(_DST_SOURCES)}
 FROM source_projections
 WHERE team IS NOT NULL AND projected_points IS NOT NULL
 GROUP BY team
