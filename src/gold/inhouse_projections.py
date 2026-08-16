@@ -71,8 +71,15 @@ _FEATURE_SQL = f"""
 WITH team_by_player_season AS (
     SELECT
         season, player_id, normalize_team(recent_team) AS team,
+        -- COUNT(*) alone isn't a total order: a player traded at the midpoint has an equal game
+        -- count on both teams, and DuckDB then resolves the tie differently from run to run,
+        -- silently reassigning their team (and with it the ol_grade/skill_grade joined below).
+        -- MAX(week) breaks ties toward the team they finished the season on, which is also the
+        -- better signal for the following season this row is used to predict; team is a final
+        -- alphabetical backstop so the ordering is total.
         ROW_NUMBER() OVER (
-            PARTITION BY season, player_id ORDER BY COUNT(*) DESC
+            PARTITION BY season, player_id
+            ORDER BY COUNT(*) DESC, MAX(week) DESC, normalize_team(recent_team)
         ) AS rn
     FROM weekly_stats
     WHERE season_type = 'REG' AND recent_team IS NOT NULL
@@ -111,6 +118,13 @@ LEFT JOIN offensive_line_grades ol ON ol.team = pt.team AND ol.season = b.target
 LEFT JOIN skill_position_grades sk
     ON sk.team = pt.team AND sk.season = b.target_season - 1 AND sk.position = b.position
 LEFT JOIN actual_outcomes o ON o.player_id = b.player_id AND o.target_season = b.target_season
+-- Not cosmetic: DuckDB's parallel joins return these rows in a different order from run to run,
+-- and HistGradientBoostingRegressor sums gradients per histogram bin in row order. Float addition
+-- isn't associative, so a reordered frame shifts split gains just enough to flip tree splits,
+-- which cascades — back-to-back rebuilds on identical data moved projections by up to 20 points.
+-- (target_season, player_id) is unique here, so this is a total order and makes rebuilds
+-- reproducible.
+ORDER BY b.target_season, b.player_id
 """
 
 

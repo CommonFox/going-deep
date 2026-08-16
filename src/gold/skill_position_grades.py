@@ -38,8 +38,12 @@ CREATE OR REPLACE TABLE skill_position_grades AS
 WITH team_by_player_season AS (
     SELECT
         stat_type, season, player_gsis_id, team_abbr,
+        -- See the matching note in inhouse_projections.py: COUNT(*) alone leaves mid-season trades
+        -- tied, and the tie resolves differently run to run. Break toward the team the player
+        -- finished on, then alphabetically so the ordering is total.
         ROW_NUMBER() OVER (
-            PARTITION BY stat_type, season, player_gsis_id ORDER BY COUNT(*) DESC
+            PARTITION BY stat_type, season, player_gsis_id
+            ORDER BY COUNT(*) DESC, MAX(week) DESC, team_abbr
         ) AS rn
     FROM ngs_data
     WHERE week BETWEEN 1 AND 18 AND team_abbr IS NOT NULL
