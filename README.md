@@ -79,7 +79,14 @@ network access of their own.
   Alongside the blend, both tables expose each source's own number as its own column
   (`espn_points`, `sleeper_points`, `cbs_points`, `fftoday_points`, plus `inhouse_points` on the
   player table), so any consensus row can be traced back to what each site actually said.
-  Pure SQL over already-loaded tables — no fetch step, no network.
+  All four external sources publish a *full-season* number — verified against CBS, the one source
+  that gives per-game points alongside the season total: its implied games played is 17.0 for all
+  888 of its rows, and the other three land within a percent of the same assumption. None of them
+  discounts for injury risk, so the in-house arm is blended in through its `projected_points_full`
+  column rather than its availability-discounted `projected_points`; mixing the two would be a
+  units mismatch rather than a difference of opinion, and would pull every percentile down hardest
+  on exactly the players most likely to miss time. Pure SQL over already-loaded tables — no fetch
+  step, no network.
 - `src/gold/adp_consensus.py` — builds `adp_consensus`: a consensus average draft position per
   player-season (QB/RB/WR/TE), blending `fantasypros_adp` and `ffc_adp` (FantasyFootballCalculator,
   PPR format) onto a shared `gsis_id` via the `merge_name` normalization in `players.py`, since
@@ -120,13 +127,27 @@ network access of their own.
   from a gradient-boosted model (scikit-learn's `HistGradientBoostingRegressor`), trained on a
   shift-based setup — `player_weighted_baselines` plus prior-season `offensive_line_grades`/
   `skill_position_grades` as features, actual next-season PPG as the label — then converted to a
-  season-total point projection via the `weighted_games_per_season` durability signal. The only
-  `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over already-loaded tables
-  instead), and the only one with a genuine train/holdout split, printing out-of-sample MAE/R2 on
-  each run, alongside out-of-sample permutation feature importance — which preseason signals
-  (recency-weighted history, durability, OL/skill-position grades) actually move the prediction,
-  not just which ones are in the feature list. Feeds into `consensus.py` as a fifth projection
-  source.
+  season-total point projection. Emits that total twice, because the model and the external sites
+  don't answer the same question: `projected_points_full` (PPG x season length, read from
+  `schedules` rather than hardcoded to 17, since the warehouse still holds 16-game seasons) is the
+  health-neutral number every external site publishes, and is what `consensus.py` blends;
+  `projected_points` (PPG x separately-modelled `expected_games`) is the same projection scaled by
+  expected availability — more informative for ranking a real roster, just not comparable to what
+  the sites print. The only `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over
+  already-loaded tables instead). Feeds into `consensus.py` as a fifth projection source.
+
+  Also builds `inhouse_backtest`, the accept/reject instrument for any future change to the model:
+  a **walk-forward** evaluation that predicts each labeled season from a model trained only on the
+  seasons before it, one fold per season, scored per position (MAE, R2, Spearman) against three
+  benchmarks — carrying last season's weighted rate forward unchanged, the preseason draft market's
+  own ordering (`adp_consensus`, re-scored on the ADP-covered players so both sit on the same
+  population), and for the availability half, `weighted_games_per_season`. ADP is the parity
+  benchmark rather than a feature: `breakout_candidates.py`'s whole premise is that this model is
+  ADP-blind, so a model that had seen ADP couldn't meaningfully disagree with it. Every fold's
+  out-of-sample predictions are stored in `inhouse_projections` alongside the live season, so
+  downstream models can be backtested too. Each run also prints out-of-sample permutation feature
+  importance — which preseason signals actually move the prediction, not just which ones are in the
+  feature list.
 - `src/gold/points_over_replacement.py` — builds `points_over_replacement`: each skill-position
   player's season-total fantasy points, recomputed from nflverse weekly stats under each league's
   own `league_settings` scoring coefficients (not nflverse's canned PPR formula), minus that

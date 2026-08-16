@@ -12,15 +12,28 @@ python -m src.silver.nfl_data
 python -m src.silver.sleeper
 python -m src.silver.espn
 python -m src.silver.fantasypros
+python -m src.silver.fantasyfootballcalculator
 python -m src.silver.fftoday
 python -m src.silver.cbs
 
-# Gold layer, in dependency order: the team-context grades and player baseline are pure
-# transforms of nfl_data.py's tables; inhouse_projections depends on all three of those; consensus
-# depends on every source above (external sites joined through the nflverse `ids` crosswalk,
-# inhouse_projections joined directly since it's already keyed on that same ID space).
+# Gold layer, in dependency order.
+#
+# First tier — pure transforms of a silver table, depending on nothing else in gold:
 python -m src.gold.offensive_line
 python -m src.gold.skill_position_grades
 python -m src.gold.player_baselines
+python -m src.gold.depth_charts
+python -m src.gold.adp_consensus
+python -m src.gold.league_settings
+
+# Second tier — inhouse_projections needs every first-tier table except league_settings
+# (player_weighted_baselines, the two grade tables, player_depth_chart, and adp_consensus as its
+# backtest benchmark); points_over_replacement needs league_settings for per-league scoring.
 python -m src.gold.inhouse_projections
+python -m src.gold.points_over_replacement
+
+# Third tier — consensus blends every external source plus inhouse_projections; boom_bust and
+# breakout_candidates each read a second-tier table alongside adp_consensus.
 python -m src.gold.consensus
+python -m src.gold.boom_bust
+python -m src.gold.breakout_candidates
