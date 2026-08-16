@@ -23,7 +23,12 @@ network access of their own.
 
 - `src/silver/nfl_data.py` — nflverse data via `nfl_data_py`: weekly stats, schedules, rosters,
   snap counts, injuries, seasonal data, depth charts, player bios, Next Gen Stats, FTN charting
-  data, PFR advanced pass/rush stats, and a cross-platform player ID crosswalk.
+  data, PFR advanced pass/rush stats, and a cross-platform player ID crosswalk. Most feeds are a
+  record of games already played and stop at the last completed season, but schedules and
+  depth-chart snapshots describe a season *before* it's played — the schedule is published in May,
+  snapshots run from the previous March through the summer — so both are fetched a year further
+  forward, which is what gives `inhouse_projections` a role signal for the season it projects.
+  Bump `_UPCOMING_SEASON` once a year.
 - `src/silver/sleeper.py` — Sleeper's public league API (no auth required): league settings,
   rosters, users, weekly matchups (including starting lineups), transactions, current NFL state,
   and the full player dictionary. Set `LEAGUE_ID` in the module before running.
@@ -79,14 +84,15 @@ network access of their own.
   Alongside the blend, both tables expose each source's own number as its own column
   (`espn_points`, `sleeper_points`, `cbs_points`, `fftoday_points`, plus `inhouse_points` on the
   player table), so any consensus row can be traced back to what each site actually said.
-  All four external sources publish a *full-season* number — verified against CBS, the one source
-  that gives per-game points alongside the season total: its implied games played is 17.0 for all
-  888 of its rows, and the other three land within a percent of the same assumption. None of them
-  discounts for injury risk, so the in-house arm is blended in through its `projected_points_full`
-  column rather than its availability-discounted `projected_points`; mixing the two would be a
-  units mismatch rather than a difference of opinion, and would pull every percentile down hardest
-  on exactly the players most likely to miss time. Pure SQL over already-loaded tables — no fetch
-  step, no network.
+  The external sources decompose a season differently from the in-house model, and reconciling that
+  is what makes the five numbers averageable. Verified against CBS, the one source giving per-game
+  points alongside the season total: it projects 17.0 games for every player it covers, backups
+  included — so it never discounts for injury risk, but it does discount for *role*, through the
+  per-game term instead (Jake Browning: 0.9 points per game across a full 17). The other three
+  behave the same way. The in-house arm is therefore blended through `projected_points_full`, which
+  reproduces that same split, rather than its availability-discounted `projected_points`; mixing
+  the two would pull every percentile down hardest on exactly the players most likely to miss time.
+  Pure SQL over already-loaded tables — no fetch step, no network.
 - `src/gold/adp_consensus.py` — builds `adp_consensus`: a consensus average draft position per
   player-season (QB/RB/WR/TE), blending `fantasypros_adp` and `ffc_adp` (FantasyFootballCalculator,
   PPR format) onto a shared `gsis_id` via the `merge_name` normalization in `players.py`, since
@@ -144,13 +150,23 @@ network access of their own.
   shift-based setup — `player_weighted_baselines` (its full volume/role/efficiency component block,
   not just `weighted_ppg_ppr`) plus prior-season `offensive_line_grades`/
   `skill_position_grades` as features, actual next-season PPG as the label — then converted to a
-  season-total point projection. Emits that total twice, because the model and the external sites
-  don't answer the same question: `projected_points_full` (PPG x season length, read from
-  `schedules` rather than hardcoded to 17, since the warehouse still holds 16-game seasons) is the
-  health-neutral number every external site publishes, and is what `consensus.py` blends;
-  `projected_points` (PPG x separately-modelled `expected_games`) is the same projection scaled by
-  expected availability — more informative for ranking a real roster, just not comparable to what
-  the sites print. The only `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over
+  season-total point projection. Also takes a role block as of the start of the season being
+  projected — `target_is_starter` and `changed_team`, from that season's week 1 depth chart, which
+  is published before a snap is played and so says nothing about the label. That is what lets the
+  model tell an incumbent from a career backup with an identical per-game history, and it also
+  repoints the OL/skill-corps grades at the team a player is *joining* rather than the one he left.
+
+  Emits the season total twice, because the model and the sites decompose a season differently.
+  `projected_points` (PPG x separately-modelled `expected_games`) is the honest expectation, and
+  the number to rank a real roster on. `projected_points_full` is what `consensus.py` blends: it
+  keeps the role discount the sites apply but drops the injury discount they don't, by measuring a
+  player's expected games against a starter's at the same position and season. Season length is
+  read from `schedules` rather than hardcoded to 17, since the warehouse still holds 16-game
+  seasons. One known bias remains in both totals: `expected_games` counts appearances in
+  `weekly_stats`, so a player who never takes a snap has no row to count and the label bottoms out
+  at 1 game rather than 0 — career backups are projected for more games than they'll play, and the
+  walk-forward can't see it, because the scoring label's games floor excludes exactly those
+  players. The only `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over
   already-loaded tables instead). Feeds into `consensus.py` as a fifth projection source.
 
   Also builds `inhouse_backtest`, the accept/reject instrument for any future change to the model:

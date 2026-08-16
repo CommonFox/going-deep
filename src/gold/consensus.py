@@ -17,14 +17,18 @@ Both tables carry each source's own number alongside the blend (`espn_points`, `
 be traced back to what each site actually said and a missing source reads as a NULL column rather
 than just a lower `num_sources`.
 
-Every external source here projects a *full* season for every player it covers — verified against
-CBS, the one source that publishes per-game points alongside the season total: its implied games
-played is 17.0 for all 888 of its rows, with the others' totals landing within a percent of the
-same assumption. None of them is discounting for injury risk. inhouse_projections is therefore
-blended in through `projected_points_full` (PPG x season length) rather than its default
-`projected_points` (PPG x *expected* games), which would otherwise be the only availability-
-discounted number in a pool of four health-neutral ones and would drag every consensus percentile
-down on exactly the players most likely to miss time.
+The external sources decompose a season differently from inhouse_projections, in a way that has to
+be reconciled before the five numbers can be averaged at all. Verified against CBS, the one source
+publishing per-game points alongside the season total: it projects 17.0 games for every player it
+covers, backups included, so it never discounts for injury risk — but it does discount for *role*,
+through the per-game term instead (Jake Browning: 0.9 points per game across a full 17). The other
+three sites' totals behave the same way.
+
+inhouse_projections is therefore blended in through `projected_points_full`, which reproduces that
+split — role discount kept, injury discount dropped — rather than its `projected_points`, the
+honest expectation including injury risk. Blending the latter would put the only availability-
+discounted number in a pool of four health-neutral ones and drag every consensus percentile down on
+exactly the players most likely to miss time.
 
 inhouse_projections can lag behind the other four sources: its prior-year feature data comes from
 nflverse, which publishes noticeably slower than the external sites' own current-season

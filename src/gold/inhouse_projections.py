@@ -5,14 +5,21 @@ over the warehouse (still no fetch step, no network). It's the "home-grown predi
 from project notes: prior-year weighted baseline + team context -> next-year PPG, meant to become
 a fifth voice in `consensus.py`'s aggregation alongside the external sites.
 
-Features, all as of `target_season - 1` (the most recent season actually played — team context for
-the season being predicted doesn't exist yet, so this stays a strictly prior-year-only setup):
+Features as of `target_season - 1` (the most recent season actually played):
 - `player_weighted_baselines.weighted_ppg_ppr` / `weighted_games_per_season` / `seasons_used` —
-  the player's own recency-weighted history and durability.
-- `offensive_line_grades.ol_grade` and `skill_position_grades.grade` (own position) for the
-  player's most-played team that season — a LEFT JOIN, since QB never matches
-  `skill_position_grades` (it only grades WR/TE/RB); HistGradientBoostingRegressor takes the
-  resulting NaN natively, no imputation needed.
+  the player's own recency-weighted history and durability, plus that table's volume/role/
+  efficiency component block and its touchdown-luck-neutral `weighted_td_regressed_ppg`.
+- `offensive_line_grades.ol_grade` and `skill_position_grades.grade` (own position) — a LEFT JOIN,
+  since QB never matches `skill_position_grades` (it only grades WR/TE/RB);
+  HistGradientBoostingRegressor takes the resulting NaN natively, no imputation needed.
+
+Plus a role block as of the start of `target_season` itself — `target_is_starter` and
+`changed_team`, from that season's week 1 depth chart. A depth chart published before a snap is
+played says nothing about the label, so this isn't leakage, and it's what lets the model tell an
+incumbent from a career backup whose per-game history looks identical. The grades above are still
+*measured* on `target_season - 1` (the season being predicted hasn't happened) but are attached to
+the team the player is joining, so an offseason move changes his supporting cast rather than
+carrying his old team's line into the projection.
 
 Plus a career block that is instead as of `target_season` itself — `seasons_of_experience`,
 `age_at_season`, `draft_pick`. Age and years-in-league for the season being
@@ -34,23 +41,34 @@ Every stored prediction is produced without the model having seen its own label:
   by a model refit on *all* labeled seasons combined, since there's no reason to hold data back
   from the projection that actually matters once the honest backtest above has already run.
 
-Two season-total columns, because the external projection sites and this model don't answer the
-same question:
-- `projected_points_full` = `predicted_ppg_ppr * season_games` — points if the player is available
-  all season. This is what every external source in `consensus.py` publishes (verified: CBS's own
-  `fppg` implies exactly 17 games for all 888 of its players, and the others match to within a
-  percent), so it's the column `consensus.py` blends. Anything else silently discounts the in-house
-  arm against four health-neutral ones and drags the consensus median down.
-- `projected_points` = `predicted_ppg_ppr * expected_games` — the same projection scaled by how
-  many games the player is actually expected to play. Strictly more informative than the full
-  season number for ranking real rosters; just not comparable to what the sites publish.
-
 `predicted_ppg_ppr` and `expected_games` are predicted separately, by models with different feature
 sets, because "how good per game" and "how many games will they play" are different questions —
 prior-year scoring rate says nothing about availability, and the role signals that do carry it (see
-`_GAMES_FEATURE_COLUMNS`) say little about scoring. Expect the games half to stay weak whatever is
-thrown at it: most of what decides availability is injury luck, which nothing in this warehouse
-observes.
+`_GAMES_FEATURE_COLUMNS`) say little about scoring.
+
+Two season-total columns come out of those two halves, because this model and the external
+projection sites decompose a season differently:
+
+- `projected_points` = `predicted_ppg_ppr * expected_games`. The honest expectation: points per
+  game he plays, times the games he's expected to play. This is the number to rank a real roster
+  on, and it is *not* what the sites publish.
+- `projected_points_full` = `predicted_ppg_ppr * role_games`, the column `consensus.py` blends.
+
+The distinction matters because the sites are internally inconsistent in a specific way, and
+matching them requires reproducing that inconsistency rather than being more correct than it. They
+do not discount a starter for injury risk — CBS projects 17.0 games for every starter it covers,
+and the others land within a percent of the same assumption — but they *do* discount a backup for
+role, expressed through the per-game term instead of through games: CBS has Jake Browning at 0.9
+points per game across a full 17. Their product is what `projected_points_full` has to be
+comparable to, so it keeps the role discount and drops the injury one. `_role_games` does that by
+measuring a player's expected games against a starter's at the same position and season.
+
+That leaves one known bias, in `expected_games` and so in both totals. Its label counts appearances
+in `weekly_stats`, so a player who never takes a snap has no row to count and the label bottoms out
+at 1 game rather than 0. Career backups are consequently projected for more games than they'll
+play, and their season totals run high — Browning lands around 55 points against ESPN's 10. Closing
+that gap needs the roster, not the box scores. Note the walk-forward can't see this at all: the
+scoring label's games floor excludes exactly the players it affects.
 """
 
 from pathlib import Path
@@ -79,6 +97,7 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 _BASE_FEATURES = [
     "weighted_ppg_ppr", "weighted_games_per_season", "seasons_used", "ol_grade", "skill_grade",
     "seasons_of_experience", "age_at_season", "draft_pick",
+    "target_is_starter", "changed_team",
 ] + _COMPONENT_COLUMNS
 _FEATURE_COLUMNS = _BASE_FEATURES + [f"position_{p}" for p in _SKILL_POSITIONS]
 
@@ -91,6 +110,10 @@ _GAMES_FEATURE_COLUMNS = [
     "weighted_games_per_season", "seasons_used",
     "seasons_of_experience", "age_at_season", "draft_pick",
     "weeks_on_depth_chart", "starter_share", "end_starter",
+    # Availability's own version of the same blind spot the PPG model had: a player who won't be
+    # on the field at all is a different proposition from one who was hurt, and only the target
+    # season's depth chart separates them before the season starts.
+    "target_is_starter",
 ] + [f"position_{p}" for p in _SKILL_POSITIONS]
 
 # Conservative for a dataset this small (a few hundred rows per cohort): shallow trees, a decent
@@ -148,18 +171,38 @@ WITH team_by_player_season AS (
 player_team AS (
     SELECT season, player_id, team FROM team_by_player_season WHERE rn = 1
 ),
-actual_outcomes AS (
+-- The scoring label keeps the games-played floor: a season cut short by injury is as untrustworthy
+-- a training target for a per-game rate as a short season is a baseline input.
+actual_scoring AS (
     SELECT
         player_id,
         season AS target_season,
-        SUM(fantasy_points_ppr) / COUNT(*) AS actual_ppg_ppr,
-        COUNT(*) AS actual_games
+        SUM(fantasy_points_ppr) / COUNT(*) AS actual_ppg_ppr
     FROM weekly_stats
     WHERE season_type = 'REG'
         AND fantasy_points_ppr IS NOT NULL
         AND position IN {_SKILL_POSITIONS}
     GROUP BY player_id, season
     HAVING COUNT(*) >= {_MIN_GAMES_PLAYED}
+),
+-- The availability label deliberately does *not*, because the floor censors exactly the outcome
+-- the games model most needs to be able to predict. Trained only on seasons of 6+ games, it could
+-- not represent a backup at all — its smallest conceivable answer was 6, so career backups came
+-- back at 8-9 games and their season totals were inflated to match. Every appearance counts here.
+--
+-- Still censored at 1, not 0: a player who never takes a snap has no weekly_stats row to count,
+-- so true zeros would have to come from the roster instead. That understates how little the
+-- deepest backups play, and is the remaining known bias in expected_games.
+actual_availability AS (
+    SELECT
+        player_id,
+        season AS target_season,
+        COUNT(*) AS actual_games
+    FROM weekly_stats
+    WHERE season_type = 'REG'
+        AND fantasy_points_ppr IS NOT NULL
+        AND position IN {_SKILL_POSITIONS}
+    GROUP BY player_id, season
 ),
 -- Role as of target_season - 1, which is what separates "wasn't the starter yet" from "kept
 -- getting hurt" — two very different stories that a games-played average alone tells identically.
@@ -175,6 +218,26 @@ prior_role AS (
         CAST(ARG_MAX(is_starter, week) AS BIGINT) AS end_starter
     FROM player_depth_chart
     GROUP BY season, gsis_id
+),
+-- Role as of the start of target_season itself, not the season before it — the one thing here
+-- that describes the season being predicted rather than the last one played. It isn't leakage:
+-- a week 1 depth chart is published before a snap of the season is played, so it says nothing
+-- about the label. It's also the single largest thing the model was missing. Without it a backup
+-- quarterback who last started ten games two years ago looks identical to the incumbent, which is
+-- why the model was projecting career backups as starters.
+--
+-- MIN(team)/MAX(is_starter) rather than ANY_VALUE: a player holds one week 1 depth chart slot in
+-- practice, but the aggregate has to be a total order regardless, or DuckDB's parallel scan
+-- resolves ties differently run to run and the projections stop being reproducible.
+target_role AS (
+    SELECT
+        season,
+        gsis_id,
+        MIN(team) AS team,
+        MAX(CASE WHEN is_starter THEN 1 ELSE 0 END) AS is_starter
+    FROM player_depth_chart
+    WHERE week = 1
+    GROUP BY season, gsis_id
 )
 SELECT
     b.target_season,
@@ -186,6 +249,24 @@ SELECT
     b.weighted_games_per_season,
 {_COMPONENT_SELECTS},
     pt.team,
+    -- The team whose supporting cast this player will actually be in: the target season's depth
+    -- chart where it knows, last season's box scores otherwise. This is what makes an offseason
+    -- move visible at all — a receiver who signs elsewhere in March used to carry his old team's
+    -- line and skill-corps grades straight into the projection.
+    COALESCE(tr.team, pt.team) AS context_team,
+    -- Absent from the depth chart is folded into "not a starter" rather than left NULL on purpose.
+    -- Being *listed at all* isn't comparable across eras — the legacy feed lists a post-cuts
+    -- 53-man roster while the current snapshot feed lists a preseason 90-man one, so coverage of
+    -- the baseline cohort runs 43% in 2019 against 68% in 2026 — but the starter call itself is
+    -- stable at 22-25% in every season. Collapsing the unstable distinction keeps the feature
+    -- meaning one fixed thing at training time and at prediction time.
+    COALESCE(tr.is_starter, 0) AS target_is_starter,
+    -- Left NULL when either side is unknown: a move that can't be observed is genuinely unknown,
+    -- unlike the starter call above, where absence carries a real meaning worth encoding.
+    CASE
+        WHEN tr.team IS NOT NULL AND pt.team IS NOT NULL
+        THEN CAST(tr.team != pt.team AS BIGINT)
+    END AS changed_team,
     ol.ol_grade,
     sk.grade AS skill_grade,
     -- Unlike every feature above, these are as of target_season itself rather than
@@ -214,12 +295,21 @@ SELECT
     -- had seen ADP could not meaningfully disagree with it.
     adp.consensus_adp,
     o.actual_ppg_ppr,
-    o.actual_games
+    av.actual_games
 FROM player_weighted_baselines b
 LEFT JOIN player_team pt ON pt.player_id = b.player_id AND pt.season = b.target_season - 1
-LEFT JOIN offensive_line_grades ol ON ol.team = pt.team AND ol.season = b.target_season - 1
+LEFT JOIN target_role tr ON tr.gsis_id = b.player_id AND tr.season = b.target_season
+-- Grades are still measured on target_season - 1 (the season being predicted hasn't been played,
+-- so it has no team context of its own) but are now attached to the team the player is joining
+-- rather than the one he left. "How good was my new supporting cast last year" is the question
+-- worth asking; "how good was the one I no longer play for" is not. Both joins have to sit after
+-- pt and tr, since they read the COALESCE across them.
+LEFT JOIN offensive_line_grades ol
+    ON ol.team = COALESCE(tr.team, pt.team) AND ol.season = b.target_season - 1
 LEFT JOIN skill_position_grades sk
-    ON sk.team = pt.team AND sk.season = b.target_season - 1 AND sk.position = b.position
+    ON sk.team = COALESCE(tr.team, pt.team)
+    AND sk.season = b.target_season - 1
+    AND sk.position = b.position
 -- players.years_of_experience is deliberately unused: it's one static value per player that
 -- doesn't equal seasons-since-rookie (Brady reads 23 against a 2000 rookie season and a final
 -- 2022 season), so applying it to a historical row would leak how the career eventually turned
@@ -230,7 +320,9 @@ LEFT JOIN prior_role pr ON pr.gsis_id = b.player_id AND pr.season = b.target_sea
 -- before the season starts, so lining it up with the season it was drafted for is what makes it a
 -- fair benchmark rather than a lagged one.
 LEFT JOIN adp_consensus adp ON adp.gsis_id = b.player_id AND adp.season = b.target_season
-LEFT JOIN actual_outcomes o ON o.player_id = b.player_id AND o.target_season = b.target_season
+LEFT JOIN actual_scoring o ON o.player_id = b.player_id AND o.target_season = b.target_season
+LEFT JOIN actual_availability av
+    ON av.player_id = b.player_id AND av.target_season = b.target_season
 -- Not cosmetic: DuckDB's parallel joins return these rows in a different order from run to run,
 -- and HistGradientBoostingRegressor sums gradients per histogram bin in row order. Float addition
 -- isn't associative, so a reordered frame shifts split gains just enough to flip tree splits,
@@ -299,15 +391,56 @@ def _metrics(fold: pd.DataFrame, target_season: int, position: str) -> dict:
             if has_adp else float("nan")
         ),
         "adp_n": len(drafted),
-        "games_mae": mean_absolute_error(fold["actual_games"], fold["expected_games"]),
-        "games_naive_mae": mean_absolute_error(
-            fold["actual_games"], fold["weighted_games_per_season"]
-        ),
     }
 
 
+def _games_metrics(games_fold: pd.DataFrame) -> dict:
+    """Score the availability half on its own population — everyone who appeared, not just the
+    players who cleared the scoring label's 6-game floor.
+
+    Scoring it on the 6+ games population instead would grade the model on a subgroup it is
+    deliberately no longer specialised to: once it can predict backups at all, its predictions for
+    everyone shift down, which reads as a regression when measured only on players who by
+    construction played a lot. The naive comparison moves to the same wider population with it, so
+    the two stay like for like.
+    """
+    return {
+        "games_n": len(games_fold),
+        "games_mae": mean_absolute_error(games_fold["actual_games"],
+                                         games_fold["expected_games"]),
+        "games_naive_mae": mean_absolute_error(games_fold["actual_games"],
+                                               games_fold["weighted_games_per_season"]),
+    }
+
+
+def _role_games(frame: pd.DataFrame) -> pd.Series:
+    """How many games this player would play at full health, given the role he's expected to hold.
+
+    `expected_games` mixes two very different reasons a player misses time — he gets hurt, or he
+    was never going to be on the field — and the external sources treat those differently. None of
+    them discounts a starter for injury risk (CBS projects 17.0 games for every starter it covers),
+    but all of them do discount a backup for role: CBS has Jake Browning at 0.9 points per game
+    across a full 17, which is a role judgment expressed through the per-game term rather than
+    through games. Their *product* is what `projected_points_full` has to be comparable to.
+
+    Dividing a player's expected games by what a starter at his position and season is expected to
+    get strips out the league-wide injury discount, which is roughly common to everyone, and leaves
+    the part that is specifically about role. A week 1 starter lands at ~1.0 and so keeps the full
+    season; a backup at half a starter's expected games keeps half of it. Capped at 1.0, since
+    "healthier than a typical starter" is not a thing this should extrapolate into extra games.
+    """
+    starters = frame[frame["target_is_starter"] == 1]
+    reference = starters.groupby(["target_season", "position"])["expected_games"].mean()
+    key = pd.MultiIndex.from_frame(frame[["target_season", "position"]])
+    reference_games = pd.Series(reference.reindex(key).to_numpy(), index=frame.index)
+    # A season/position with no listed starter at all leaves the ratio undefined; falling back to
+    # 1.0 keeps that player on the full season rather than silently zeroing his projection.
+    ratio = (frame["expected_games"] / reference_games).clip(upper=1.0).fillna(1.0)
+    return frame["season_games"] * ratio
+
+
 def _walk_forward(
-    labeled: pd.DataFrame, fold_seasons: list[int]
+    labeled: pd.DataFrame, labeled_games: pd.DataFrame, fold_seasons: list[int]
 ) -> tuple[list[pd.DataFrame], pd.DataFrame]:
     """Predict each labeled season from a model trained only on the seasons before it.
 
@@ -316,22 +449,34 @@ def _walk_forward(
     instrument for any change to the feature set — hence one fold per labeled season, each training
     on everything that came before it, exactly mirroring how the live model is fit.
     """
-    predictions, metrics = [], []
+    predictions, games_predictions, metrics = [], [], []
     for season in fold_seasons:
         train = labeled[labeled["target_season"] < season]
+        # The games half trains on its own, wider slice — every player who appeared at all, not
+        # just those clearing the scoring label's games floor — and is scored on that same wider
+        # population below.
+        train_games = labeled_games[labeled_games["target_season"] < season]
+        games_model = _fit_games(train_games)
+
         fold = labeled[labeled["target_season"] == season].copy()
         fold["predicted_ppg_ppr"] = _fit(train).predict(fold[_FEATURE_COLUMNS])
-        fold["expected_games"] = _fit_games(train).predict(fold[_GAMES_FEATURE_COLUMNS])
+        fold["expected_games"] = games_model.predict(fold[_GAMES_FEATURE_COLUMNS])
         predictions.append(fold)
 
-        metrics.append(_metrics(fold, season, "ALL"))
+        games_fold = labeled_games[labeled_games["target_season"] == season].copy()
+        games_fold["expected_games"] = games_model.predict(games_fold[_GAMES_FEATURE_COLUMNS])
+        games_predictions.append(games_fold)
+
+        metrics.append(_metrics(fold, season, "ALL") | _games_metrics(games_fold))
         for position, group in fold.groupby("position"):
             if len(group) >= _MIN_METRIC_ROWS:
                 metrics.append(_metrics(group, season, position))
-    return predictions, pd.DataFrame(metrics)
+    return predictions, games_predictions, pd.DataFrame(metrics)
 
 
-def _print_backtest_report(metrics: pd.DataFrame, folds: list[pd.DataFrame]) -> None:
+def _print_backtest_report(
+    metrics: pd.DataFrame, folds: list[pd.DataFrame], games_folds: list[pd.DataFrame]
+) -> None:
     overall = metrics[metrics["position"] == "ALL"]
     print("\nWalk-forward backtest — each season predicted by a model trained only on prior ones:")
     print(f"  {'season':>6} {'n':>5} {'MAE':>6} {'R2':>6} {'rho':>6} | "
@@ -356,9 +501,10 @@ def _print_backtest_report(metrics: pd.DataFrame, folds: list[pd.DataFrame]) -> 
               f"{row['adp_spearman']:>7.3f} {row['model_spearman_vs_adp']:>9.3f} "
               f"{row['adp_n']:>6}")
 
-    games = _metrics(pooled, 0, "ALL")
-    print(f"\n  Games played, pooled: MAE={games['games_mae']:.2f} vs "
-          f"{games['games_naive_mae']:.2f} for the weighted average it replaces")
+    games = _games_metrics(pd.concat(games_folds, ignore_index=True))
+    print(f"\n  Games played, pooled over every player who appeared (n={games['games_n']}): "
+          f"MAE={games['games_mae']:.2f} vs {games['games_naive_mae']:.2f} for the weighted "
+          f"average it replaces")
 
 
 def build_inhouse_projections() -> None:
@@ -377,6 +523,7 @@ def build_inhouse_projections() -> None:
         season_games.setdefault(int(season), latest_scheduled)
 
     labeled = df[df["actual_ppg_ppr"].notna()].sort_values("target_season")
+    labeled_games = df[df["actual_games"].notna()].sort_values("target_season")
     labeled_seasons = sorted(labeled["target_season"].unique())
     fold_seasons = [s for s in labeled_seasons if s > _MIN_TRAIN_SEASON_WITH_TEAM_CONTEXT]
     live_season = df["target_season"].max()
@@ -385,8 +532,10 @@ def build_inhouse_projections() -> None:
     metrics = pd.DataFrame()
 
     if fold_seasons:
-        output_frames, metrics = _walk_forward(labeled, fold_seasons)
-        _print_backtest_report(metrics, output_frames)
+        output_frames, games_frames, metrics = _walk_forward(
+            labeled, labeled_games, fold_seasons
+        )
+        _print_backtest_report(metrics, output_frames, games_frames)
 
         # Out-of-sample (on the fold, not its training slice) so a feature the model overfit to
         # doesn't look important just because it memorized training noise. Answers "do the
@@ -408,17 +557,24 @@ def build_inhouse_projections() -> None:
     else:
         print("No labeled season has a trainable prior slice yet — skipping the backtest.")
 
-    # Restrict live output to players who actually played in target_season - 1: without that,
-    # a player with no data more recent than 2+ years back (e.g. a retiree like Tom Brady, whose
-    # last game was 2022) still gets extrapolated forward from their old numbers, with nothing in
-    # the feature set signaling they're no longer active. Backtest folds are untouched — a missing
-    # prior-year team there is just a smaller feature signal, not a "don't show this" judgment call
-    # the way it is for the live cohort actually feeding consensus.py.
-    live = df[(df["target_season"] == live_season) & df["team"].notna()].copy()
+    # Restrict live output to players with some evidence they're actually in the league: either
+    # they're on the target season's week 1 depth chart, or they played the season before. Without
+    # that, a player with no data more recent than 2+ years back (e.g. a retiree like Tom Brady,
+    # whose last game was 2022) still gets extrapolated forward from their old numbers.
+    #
+    # The depth chart half is what the previous prior-season-only test was missing: it admits ~40
+    # players returning from a lost season, whose presence on a current depth chart is direct
+    # evidence of exactly the "are they still active" question that used to have no answer here.
+    # It deliberately does not go the other way and *drop* players the chart hasn't listed — 61 of
+    # them played last season, and they include genuine free agents still likely to sign.
+    #
+    # Backtest folds are untouched: a missing team there is just a smaller feature signal, not a
+    # "don't show this" judgment call the way it is for the live cohort feeding consensus.py.
+    live = df[(df["target_season"] == live_season) & df["context_team"].notna()].copy()
     if not labeled.empty:
         final_model = _fit(labeled)
         live["predicted_ppg_ppr"] = final_model.predict(live[_FEATURE_COLUMNS])
-        live["expected_games"] = _fit_games(labeled).predict(live[_GAMES_FEATURE_COLUMNS])
+        live["expected_games"] = _fit_games(labeled_games).predict(live[_GAMES_FEATURE_COLUMNS])
     else:
         live["predicted_ppg_ppr"] = float("nan")
         live["expected_games"] = float("nan")
@@ -427,11 +583,12 @@ def build_inhouse_projections() -> None:
 
     result = pd.concat(output_frames, ignore_index=True)
     result["season_games"] = result["target_season"].map(season_games)
+    result["role_games"] = _role_games(result)
     result["projected_points"] = result["predicted_ppg_ppr"] * result["expected_games"]
-    result["projected_points_full"] = result["predicted_ppg_ppr"] * result["season_games"]
+    result["projected_points_full"] = result["predicted_ppg_ppr"] * result["role_games"]
     result = result[[
         "player_id", "player_name", "position", "target_season",
-        "predicted_ppg_ppr", "expected_games", "season_games",
+        "predicted_ppg_ppr", "expected_games", "season_games", "role_games",
         "projected_points", "projected_points_full",
     ]]
 
