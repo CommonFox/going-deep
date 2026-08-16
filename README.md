@@ -280,6 +280,35 @@ network access of their own.
   games-played check the way `boom_bust` has, since both describe an *actual* outcome that, for the
   live target season, hasn't happened yet — `predicted_delta` is left as a continuous score to
   sort/filter directly. Pure SQL over already-loaded tables — no fetch step, no network.
+- `src/gold/player_archetypes.py` — builds `player_archetypes` and `archetype_outcomes`: sorts every
+  drafted player-season into a career-stage archetype, then measures what each archetype is actually
+  worth. The taxonomy crosses "has he ever finished elite" (`prior_elite_finishes`, counted strictly
+  from earlier seasons so a player's own breakout can never classify him) against the age curve
+  (27+ or year 7+), giving `Unproven Youth` / `Unproven Prime` / `Proven Prime` /
+  `Unproven Veteran` / `Proven Veteran`.
+
+  `archetype_outcomes` reports each cell's rate profile over `boom_bust`'s buckets — boomed,
+  busted, got injured, returned on ADP — but the headline correction is that **those rates are
+  mostly a restatement of ADP**: proven prime RBs finish elite 48.6% of the time against 8.1% for
+  unproven youth, and they are drafted at pick 30 against pick 170. Scoring archetypes off them pays
+  for information already in the price. The score is therefore built on `draft_value`'s
+  `surplus_centered` — value minus what that *ADP slot* historically returned. After that
+  adjustment only three cells clear |t| >= 2 on one league: `RB`/`Proven Prime` at **+17.8 points
+  (t=2.63, positive in 6 of 8 seasons, and positive inside every ADP band it appears in)**, and
+  `WR`/`Proven Veteran` (-6.3) and `WR`/`Unproven Veteran` (-3.9), i.e. aging receivers are
+  systematically overpriced. Notably the "trusty veteran" penalty is a *receiver* effect —
+  `RB`/`Proven Veteran` sits at +2.3, indistinguishable from zero.
+
+  Everything else is noise, so `archetype_edge` is gated to 0.0 outside those cells rather than
+  reported for all twenty: scored naively, `QB`/`Proven Prime` would carry +10.0 off 46 rows and
+  then invert out of sample. A general "rank players by their archetype's historical surplus" score
+  does not work at all — walk-forward over 2,667 player-seasons it lands at Spearman -0.031
+  (p=0.11), and shrinkage, beat-price rate and a shrunk rate all do worse. Two caveats are recorded
+  in the module: the gate applied walk-forward passes only the *negative* cells (which do hold up —
+  marked-down players realise -1.83 surplus and finish elite 3.4% against +0.44 and 17.4% for
+  ungated ones), and it never passes `RB`/`Proven Prime` in any historical fold, because that cell
+  needs the full eight seasons to clear t=2. The RB prime edge is a strong full-sample finding that
+  was not prospectively detectable at the sample sizes available.
 
 ## Environment
 
