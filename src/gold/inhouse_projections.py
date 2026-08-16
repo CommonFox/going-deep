@@ -70,7 +70,7 @@ _MIN_TRAIN_SEASON_WITH_TEAM_CONTEXT = 2019
 _FEATURE_SQL = f"""
 WITH team_by_player_season AS (
     SELECT
-        season, player_id, normalize_team(recent_team) AS team,
+        season, player_id, normalize_team(team) AS team,
         -- COUNT(*) alone isn't a total order: a player traded at the midpoint has an equal game
         -- count on both teams, and DuckDB then resolves the tie differently from run to run,
         -- silently reassigning their team (and with it the ol_grade/skill_grade joined below).
@@ -79,11 +79,11 @@ WITH team_by_player_season AS (
         -- alphabetical backstop so the ordering is total.
         ROW_NUMBER() OVER (
             PARTITION BY season, player_id
-            ORDER BY COUNT(*) DESC, MAX(week) DESC, normalize_team(recent_team)
+            ORDER BY COUNT(*) DESC, MAX(week) DESC, normalize_team(team)
         ) AS rn
     FROM weekly_stats
-    WHERE season_type = 'REG' AND recent_team IS NOT NULL
-    GROUP BY season, player_id, normalize_team(recent_team)
+    WHERE season_type = 'REG' AND team IS NOT NULL
+    GROUP BY season, player_id, normalize_team(team)
 ),
 player_team AS (
     SELECT season, player_id, team FROM team_by_player_season WHERE rn = 1

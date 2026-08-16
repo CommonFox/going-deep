@@ -41,7 +41,7 @@ _STAT_COEFFICIENTS = {
     "passing_yards": "pass_yd_pts",
     "passing_tds": "pass_td_pts",
     "passing_2pt_conversions": "pass_2pt_pts",
-    "interceptions": "pass_int_pts",
+    "passing_interceptions": "pass_int_pts",
     "rushing_yards": "rush_yd_pts",
     "rushing_tds": "rush_td_pts",
     "rushing_2pt_conversions": "rush_2pt_pts",
