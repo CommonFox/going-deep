@@ -163,28 +163,34 @@ network access of their own.
   keeps the role discount the sites apply but drops the injury discount they don't, by measuring a
   player's expected games against a starter's at the same position and season. Season length is
   read from `schedules` rather than hardcoded to 17, since the warehouse still holds 16-game
-  seasons. One known bias remains in both totals: `expected_games` counts appearances in
-  `weekly_stats`, so a player who never takes a snap has no row to count and the label bottoms out
-  at 1 game rather than 0 — career backups are projected for more games than they'll play, and the
-  walk-forward can't see it, because the scoring label's games floor excludes exactly those
-  players.
+  seasons. Both totals depend on `expected_games`, whose label is anchored on the **roster** rather
+  than the box score: a player who was in the league all season and never took a snap has no
+  `weekly_stats` row at all, so counting only those rows made him read as unobserved instead of as
+  the zero he is (~90-110 players a season). Without those zeros the model can't answer below about
+  4 games and career backups keep season totals they'll never earn. The scoring walk-forward can't
+  see any of this — its games floor excludes exactly the affected players — so availability is
+  scored on its own population.
 
-  A second, much smaller model covers **first-season players**, who have no prior-season history
-  for any of the above to read and so were absent from the table entirely (150 players ESPN
-  projected and this warehouse didn't, the whole incoming rookie class among them). It reads what a
-  human reads for a rookie: draft capital, the landing spot's line and skill-corps grades, and
-  whether he has already won a week 1 job. Its cohort — every first-season player reaching that
-  season's week 1 depth chart — is a *closed* population, which makes its availability label the
-  one genuinely uncensored label here: a rookie with no `weekly_stats` row didn't play, so 0 is
-  honest rather than missing. Draft capital comes from `rosters.draft_number` rather than
+  A second, much smaller model covers everyone the first structurally can't see: players with **no
+  `player_weighted_baselines` row**, having never put together a season of 6+ games. Every feature
+  above derives from that row, so without one there's nothing to predict from, and those players
+  were absent from the table entirely (150 that ESPN projected and this warehouse didn't). Two
+  groups land there and they're the same modelling problem — rookies with no NFL history at all,
+  and fringe veterans who've played but never enough in one season to earn a baseline. It reads
+  what a human reads for an unproven player: draft capital, the landing spot's line and skill-corps
+  grades, whether he's already won a week 1 job, and an unweighted career rate that's NULL for a
+  true rookie and so tells the model which of the two it's looking at. Its cohort — every such
+  player reaching that season's week 1 depth chart — is a *closed* population, so its availability
+  label is uncensored by construction. Draft capital comes from `rosters.draft_number` rather than
   `players.draft_pick`, which is the more natural home for it but lags by months and carried no
   2026 class at all during the 2026 preseason. Both arms write to the same table, so `role_games`
   normalises over one combined population and consumers don't need to know there are two models
-  behind the column. Backtested the same walk-forward way, the rookie arm is the one place in this
-  warehouse that **beats** preseason ADP at ranking (Spearman 0.620 vs 0.503 pooled over 2020-2025),
-  which is less surprising than it sounds: rookie ADP is hype-driven, while draft slot and a won
-  job are not. The only `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over
-  already-loaded tables instead). Feeds into `consensus.py` as a fifth projection source.
+  behind the column. Backtested the same walk-forward way, this arm is the one place in the
+  warehouse that **beats** preseason ADP at ranking (Spearman 0.618 vs 0.494 pooled over
+  2020-2025), which is less surprising than it sounds: ADP for unproven players is hype-driven,
+  while draft slot and a won job are not. The only `src/gold` module that isn't pure SQL
+  (Python/pandas/scikit-learn over already-loaded tables instead). Feeds into `consensus.py` as a
+  fifth projection source.
 
   Also builds `inhouse_backtest`, the accept/reject instrument for any future change to the model:
   a **walk-forward** evaluation that predicts each labeled season from a model trained only on the

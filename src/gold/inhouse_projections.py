@@ -33,15 +33,22 @@ Label: actual PPG in `target_season`, only for players who played >= the same ga
 `player_baselines.py` uses (imported, not redefined) — an actual season cut short by injury is as
 untrustworthy a training target as a short season is a baseline input.
 
-A second, much smaller model covers first-season players, who have no prior-season history for the
-features above to read and so were simply absent from this table — 150 players ESPN projected and
-this warehouse didn't, the entire incoming rookie class among them. It reads what a drafting human
-reads for a rookie instead: draft capital, the landing spot's line and skill-corps grades, and
-whether he's already won a week 1 job. Its cohort is every first-season player who reaches that
-season's week 1 depth chart, which makes its availability label genuinely uncensored — that
-population is closed, so a rookie with no weekly_stats row didn't play, and 0 is the honest label
-rather than a missing row. Both arms write to this one table so that `_role_games` normalises over
-one combined population and consumers don't need to know there are two models behind the column.
+A second, much smaller model covers everyone the arm above structurally cannot see: players with no
+`player_weighted_baselines` row for the season, because they have never put together a season of
+`_MIN_GAMES_PLAYED` games. Every feature above derives from that row, so without one there is
+nothing to predict from, and those players were simply absent from this table — 150 of them that
+ESPN projected and this warehouse didn't. Two groups land there and they are the same modelling
+problem: rookies with no NFL history at all, and fringe veterans who have played but never enough
+in one season to earn a baseline. It reads what a human reads for an unproven player instead —
+draft capital, the landing spot's line and skill-corps grades, whether he has already won a week 1
+job, and an unweighted career rate that is NULL for a true rookie and so tells the model which of
+the two it's looking at.
+
+Its cohort is every such player reaching that season's week 1 depth chart, which makes its
+availability label uncensored: that population is closed, so no weekly_stats row means he didn't
+play, and 0 is honest rather than missing. Both arms write to this one table so that `_role_games`
+normalises over one combined population and consumers don't need to know there are two models
+behind the column.
 
 Draft capital comes from `rosters.draft_number`, not `players.draft_pick`: the latter is the more
 natural home for it but is published on a long enough lag that it carried no 2026 draft class at
@@ -77,12 +84,13 @@ points per game across a full 17. Their product is what `projected_points_full` 
 comparable to, so it keeps the role discount and drops the injury one. `_role_games` does that by
 measuring a player's expected games against a starter's at the same position and season.
 
-That leaves one known bias, in `expected_games` and so in both totals. Its label counts appearances
-in `weekly_stats`, so a player who never takes a snap has no row to count and the label bottoms out
-at 1 game rather than 0. Career backups are consequently projected for more games than they'll
-play, and their season totals run high — Browning lands around 55 points against ESPN's 10. Closing
-that gap needs the roster, not the box scores. Note the walk-forward can't see this at all: the
-scoring label's games floor excludes exactly the players it affects.
+Both arms' availability labels are anchored on the roster rather than the box score, because a
+player who was in the league all season and never took a snap has no `weekly_stats` row at all and
+would otherwise read as unobserved rather than as the zero he is — roughly 90-110 players a season
+on the veteran side alone. Without those zeros the model cannot answer below about 4 games, and
+career backups keep season totals they will never earn. Note the scoring walk-forward can't see any
+of this: its games floor excludes exactly the players it affects, so the availability metrics are
+reported on their own population.
 """
 
 from pathlib import Path
@@ -159,47 +167,77 @@ WHERE game_type = 'REG'
 GROUP BY season
 """
 
-# Rookies get their own model rather than a row in the one above, because the veteran model's
-# entire input is a prior-season history they don't have — a first-year player has no
-# player_weighted_baselines row at all, which is why they were simply absent from this table until
-# now (150 players ESPN projected and this warehouse didn't, including every 2026 first-rounder).
+# A second arm for players the veteran model structurally cannot see: those with no
+# player_weighted_baselines row for the season being projected, because they've never put together
+# a season of `_MIN_GAMES_PLAYED` games. Everything the veteran arm reads is derived from that row,
+# so without one there's nothing to predict from and the player was simply absent from this table.
 #
-# What replaces that history is what a drafting human uses for a rookie anyway: where he went in
-# the draft, what he walked into, and whether he's already won a job. Kept deliberately small —
-# roughly 60-95 rookies reach a week 1 depth chart per season, so this trains on hundreds of rows
-# where the veteran arm has thousands, and a wide feature set would just memorise them.
-_ROOKIE_FEATURES = [
-    "draft_number", "age_at_season", "ol_grade", "skill_grade", "target_is_starter",
+# Two groups land here, and they're the same modelling problem. Rookies, who have no NFL history at
+# all (~55-95 a season), and fringe veterans who have played but never enough in one season to earn
+# a baseline (~35-55 a season). Covering only the first left the second uncovered — 38 of the 39
+# skill players ESPN projected and this warehouse still didn't. Pooling them also roughly doubles
+# the training data, which the rookie half benefits from too.
+#
+# What replaces the missing history is what a human reads for an unproven player anyway: where he
+# went in the draft, what he walked into, whether he's already won a job, and — for the ones who
+# have played at all — their unweighted career rate, which is NULL for a true rookie and so tells
+# the model which of the two groups it's looking at. Kept deliberately small: this trains on
+# hundreds of rows where the veteran arm has thousands, and a wide feature set would just memorise.
+_NO_BASELINE_FEATURES = [
+    "draft_number", "age_at_season", "seasons_of_experience", "career_ppg", "career_games",
+    "ol_grade", "skill_grade", "target_is_starter",
 ]
-_ROOKIE_FEATURE_COLUMNS = _ROOKIE_FEATURES + [f"position_{p}" for p in _SKILL_POSITIONS]
+_NO_BASELINE_FEATURE_COLUMNS = (
+    _NO_BASELINE_FEATURES + [f"position_{p}" for p in _SKILL_POSITIONS]
+)
 
-# Draft capital and a won job are close to the whole story on whether a rookie sees the field;
-# nothing about the landing spot's blocking tells you much about his own availability.
-_ROOKIE_GAMES_FEATURE_COLUMNS = [
-    "draft_number", "age_at_season", "target_is_starter",
+# Draft capital, experience and a won job are close to the whole story on whether an unproven
+# player sees the field; nothing about the landing spot's blocking tells you much about his own
+# availability.
+_NO_BASELINE_GAMES_FEATURE_COLUMNS = [
+    "draft_number", "age_at_season", "seasons_of_experience", "career_games", "target_is_starter",
 ] + [f"position_{p}" for p in _SKILL_POSITIONS]
 
 _COMPONENT_SELECTS = ",\n".join(f"    b.{column}" for column in _COMPONENT_COLUMNS)
 
-# The rookie cohort is every first-season player who reaches that season's week 1 depth chart.
-# Roster membership alone would be the wrong test: it isn't comparable across eras (the current
-# feed lists a preseason 90-man roster where the older ones list far fewer), and a rookie who never
-# reaches a depth chart is not a player any draft board needs a number for.
+# The cohort is every player reaching that season's week 1 depth chart who has no
+# player_weighted_baselines row for it. Roster membership alone would be the wrong test: it isn't
+# comparable across eras (the current feed lists a preseason 90-man roster where the older ones
+# list far fewer), and a player who never reaches a depth chart is not one any draft board needs a
+# number for.
 #
 # draft_number comes from rosters rather than players.draft_pick, which is the more natural home
 # for it but is published on a long enough lag that it had no 2026 class at all while the roster
 # feed already carried the full board. NULL means undrafted, which is signal, not absence.
-_ROOKIE_FEATURE_SQL = f"""
-WITH rookie_cohort AS (
+_NO_BASELINE_FEATURE_SQL = f"""
+WITH roster_facts AS (
     SELECT
         player_id,
         season,
         MIN(draft_number) AS draft_number,
+        MIN(years_exp) AS seasons_of_experience,
         ANY_VALUE(player_name) AS player_name,
         MIN(position) AS position
     FROM rosters
-    WHERE years_exp = 0 AND position IN {_SKILL_POSITIONS}
+    WHERE position IN {_SKILL_POSITIONS}
     GROUP BY player_id, season
+),
+-- Every prior season's games and points, with no games-played floor — the floor is precisely why
+-- these players have no baseline, so applying it again would zero out the only history they have.
+-- Unweighted, unlike player_weighted_baselines: there's too little of it for recency weighting to
+-- say anything a plain career rate doesn't.
+career_to_date AS (
+    SELECT
+        w.player_id,
+        s.season,
+        SUM(w.fantasy_points_ppr) / COUNT(*) AS career_ppg,
+        COUNT(*) AS career_games
+    FROM weekly_stats w
+    JOIN (SELECT DISTINCT season FROM roster_facts) s ON w.season < s.season
+    WHERE w.season_type = 'REG'
+        AND w.fantasy_points_ppr IS NOT NULL
+        AND w.position IN {_SKILL_POSITIONS}
+    GROUP BY w.player_id, s.season
 ),
 week_one_role AS (
     SELECT
@@ -237,6 +275,9 @@ SELECT
     r.player_name,
     r.position,
     r.draft_number,
+    r.seasons_of_experience,
+    c.career_ppg,
+    c.career_games,
     w.team AS context_team,
     w.is_starter AS target_is_starter,
     r.season - YEAR(TRY_CAST(pl.birth_date AS DATE)) AS age_at_season,
@@ -257,8 +298,13 @@ SELECT
         WHEN r.season <= (SELECT MAX(season) FROM weekly_stats)
         THEN COALESCE(av.actual_games, 0)
     END AS actual_games
-FROM rookie_cohort r
+FROM roster_facts r
 JOIN week_one_role w ON w.gsis_id = r.player_id AND w.season = r.season
+-- The defining condition: no usable prior-season baseline, so the veteran arm has nothing to read.
+-- This is what keeps the two arms disjoint — every player gets a number from exactly one of them.
+LEFT JOIN player_weighted_baselines b
+    ON b.player_id = r.player_id AND b.target_season = r.season
+LEFT JOIN career_to_date c ON c.player_id = r.player_id AND c.season = r.season
 LEFT JOIN players pl ON pl.gsis_id = r.player_id
 LEFT JOIN offensive_line_grades ol ON ol.team = w.team AND ol.season = r.season - 1
 LEFT JOIN skill_position_grades sk
@@ -267,6 +313,7 @@ LEFT JOIN adp_consensus adp ON adp.gsis_id = r.player_id AND adp.season = r.seas
 LEFT JOIN actual_scoring o ON o.player_id = r.player_id AND o.target_season = r.season
 LEFT JOIN actual_availability av
     ON av.player_id = r.player_id AND av.target_season = r.season
+WHERE b.player_id IS NULL
 -- Same reproducibility guard as the veteran query: a stable total order over the frame, so
 -- histogram binning can't shift between runs on identical data.
 ORDER BY r.season, r.player_id
@@ -311,23 +358,41 @@ actual_scoring AS (
     HAVING COUNT(*) >= {_MIN_GAMES_PLAYED}
 ),
 -- The availability label deliberately does *not*, because the floor censors exactly the outcome
--- the games model most needs to be able to predict. Trained only on seasons of 6+ games, it could
--- not represent a backup at all — its smallest conceivable answer was 6, so career backups came
--- back at 8-9 games and their season totals were inflated to match. Every appearance counts here.
+-- the games model most needs to be able to predict, and it's anchored on the roster rather than
+-- the box score for the same reason. Counting only weekly_stats rows means a player who was in the
+-- league all year and never took a snap has no row at all, so he reads as unobserved rather than
+-- as the zero he actually is — roughly 90-110 players a season, on top of the 75-100 who play 1-5
+-- games. Left to itself the model then can't answer below about 4 games, and career backups keep
+-- season totals they'll never earn.
 --
--- Still censored at 1, not 0: a player who never takes a snap has no weekly_stats row to count,
--- so true zeros would have to come from the roster instead. That understates how little the
--- deepest backups play, and is the remaining known bias in expected_games.
-actual_availability AS (
-    SELECT
-        player_id,
-        season AS target_season,
-        COUNT(*) AS actual_games
+-- Anchoring on rosters supplies those zeros: roster membership is the statement "in the league
+-- this season", and the appearance count is then a genuine 0 rather than a missing row. Practice
+-- squad and cut spells are deliberately kept — a player on the practice squad really does play
+-- zero games, which is the case being modelled. FULL OUTER so a weekly_stats row with no matching
+-- roster row (nflverse has a handful) keeps its label instead of silently vanishing.
+roster_seasons AS (
+    SELECT DISTINCT player_id, season
+    FROM rosters
+    WHERE position IN {_SKILL_POSITIONS}
+        -- Without this the live season, whose rosters are published but whose games haven't been
+        -- played, would label every player a real 0.
+        AND season <= (SELECT MAX(season) FROM weekly_stats)
+),
+appearances AS (
+    SELECT player_id, season, COUNT(*) AS games
     FROM weekly_stats
     WHERE season_type = 'REG'
         AND fantasy_points_ppr IS NOT NULL
         AND position IN {_SKILL_POSITIONS}
     GROUP BY player_id, season
+),
+actual_availability AS (
+    SELECT
+        COALESCE(rs.player_id, a.player_id) AS player_id,
+        COALESCE(rs.season, a.season) AS target_season,
+        COALESCE(a.games, 0) AS actual_games
+    FROM roster_seasons rs
+    FULL OUTER JOIN appearances a ON a.player_id = rs.player_id AND a.season = rs.season
 ),
 -- Role as of target_season - 1, which is what separates "wasn't the starter yet" from "kept
 -- getting hurt" — two very different stories that a games-played average alone tells identically.
@@ -482,8 +547,8 @@ def _fit_games(train: pd.DataFrame) -> HistGradientBoostingRegressor:
 def _fit_generic(
     train: pd.DataFrame, feature_columns: list[str], label: str
 ) -> HistGradientBoostingRegressor:
-    """Same estimator and settings, with the feature set and label passed in — the rookie arm uses
-    a different set of both, but there's no reason for it to use different hyperparameters."""
+    """Same estimator and settings, with the feature set and label passed in — the unproven arm
+    uses a different set of both, but no reason to use different hyperparameters."""
     model = HistGradientBoostingRegressor(**_MODEL_PARAMS)
     model.fit(train[feature_columns], train[label])
     return model
@@ -548,21 +613,21 @@ def _games_metrics(games_fold: pd.DataFrame) -> dict:
     }
 
 
-def _rookie_metrics(fold: pd.DataFrame, target_season: int) -> dict:
-    """Score one rookie fold.
+def _no_baseline_metrics(fold: pd.DataFrame, target_season: int) -> dict:
+    """Score one unproven-player fold.
 
     The naive benchmark can't be "carry last season forward" the way it is for veterans — there is
-    no last season. It's the position's mean rookie PPG over the training seasons instead, which is
-    the honest "no model, just know what rookies at this position usually do" baseline. ADP is the
-    same parity benchmark as everywhere else, and matters more here than anywhere: a rookie's draft
-    position is most of what the market is going on too, so this is close to a like-for-like test.
+    no qualifying last season, which is what put these players here. It's the position's mean PPG
+    over the training seasons instead: the honest "no model, just know what players at this
+    position usually do" baseline. ADP is the same parity benchmark as everywhere else, and matters
+    more here than anywhere, since draft capital is most of what the market is going on too.
     """
     actual, predicted = fold["actual_ppg_ppr"], fold["predicted_ppg_ppr"]
     drafted = fold[fold["consensus_adp"].notna()]
     has_adp = len(drafted) >= _MIN_METRIC_ROWS
     return {
         "target_season": target_season,
-        "position": "ROOKIE",
+        "position": "NO_BASELINE",
         "n": len(fold),
         "mae": mean_absolute_error(actual, predicted),
         "r2": r2_score(actual, predicted),
@@ -581,13 +646,14 @@ def _rookie_metrics(fold: pd.DataFrame, target_season: int) -> dict:
     }
 
 
-def _walk_forward_rookies(
+def _walk_forward_no_baseline(
     labeled: pd.DataFrame, cohort: pd.DataFrame, fold_seasons: list[int]
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame], pd.DataFrame]:
-    """Walk-forward for the rookie arm, same shape as the veteran one.
+    """Walk-forward for the unproven arm, same shape as the veteran one.
 
     The games half trains on the whole cohort rather than only the scoring-labelled part, because
-    here the whole cohort *is* the label: a rookie who never played is a real 0, not a missing row.
+    here the whole cohort *is* the label: a player who never appeared is a real 0, not a missing
+    row.
     """
     predictions, games_predictions, metrics = [], [], []
     for season in fold_seasons:
@@ -595,13 +661,13 @@ def _walk_forward_rookies(
         train_cohort = cohort[cohort["target_season"] < season]
         if train.empty or train_cohort.empty:
             continue
-        games_model = _fit_generic(train_cohort, _ROOKIE_GAMES_FEATURE_COLUMNS, "actual_games")
-        scoring_model = _fit_generic(train, _ROOKIE_FEATURE_COLUMNS, "actual_ppg_ppr")
+        games_model = _fit_generic(train_cohort, _NO_BASELINE_GAMES_FEATURE_COLUMNS, "actual_games")
+        scoring_model = _fit_generic(train, _NO_BASELINE_FEATURE_COLUMNS, "actual_ppg_ppr")
 
         fold = labeled[labeled["target_season"] == season].copy()
         if not fold.empty:
-            fold["predicted_ppg_ppr"] = scoring_model.predict(fold[_ROOKIE_FEATURE_COLUMNS])
-            fold["expected_games"] = games_model.predict(fold[_ROOKIE_GAMES_FEATURE_COLUMNS])
+            fold["predicted_ppg_ppr"] = scoring_model.predict(fold[_NO_BASELINE_FEATURE_COLUMNS])
+            fold["expected_games"] = games_model.predict(fold[_NO_BASELINE_GAMES_FEATURE_COLUMNS])
             # Position means come from the training slice only — a benchmark computed on the fold
             # would have seen the answers the model is being graded against.
             position_means = train.groupby("position")["actual_ppg_ppr"].mean()
@@ -610,11 +676,11 @@ def _walk_forward_rookies(
             )
             predictions.append(fold)
             if len(fold) >= _MIN_METRIC_ROWS:
-                metrics.append(_rookie_metrics(fold, season))
+                metrics.append(_no_baseline_metrics(fold, season))
 
         games_fold = cohort[cohort["target_season"] == season].copy()
         games_fold["expected_games"] = games_model.predict(
-            games_fold[_ROOKIE_GAMES_FEATURE_COLUMNS]
+            games_fold[_NO_BASELINE_GAMES_FEATURE_COLUMNS]
         )
         games_predictions.append(games_fold)
     return predictions, games_predictions, pd.DataFrame(metrics)
@@ -681,10 +747,10 @@ def _walk_forward(
     return predictions, games_predictions, pd.DataFrame(metrics)
 
 
-def _print_rookie_report(
+def _print_no_baseline_report(
     metrics: pd.DataFrame, folds: list[pd.DataFrame], games_folds: list[pd.DataFrame]
 ) -> None:
-    print("\nRookie arm walk-forward (first-season players, no prior history to work from):")
+    print("\nUnproven arm walk-forward (no qualifying prior season to work from):")
     print(f"  {'season':>6} {'n':>5} {'MAE':>6} {'R2':>6} {'rho':>6} | "
           f"{'naive MAE':>9} {'naive rho':>9} | {'ADP rho':>7} {'model rho':>9} {'(n)':>6}")
     for row in metrics.itertuples():
@@ -693,22 +759,22 @@ def _print_rookie_report(
               f"{row.adp_spearman:>7.3f} {row.model_spearman_vs_adp:>9.3f} {row.adp_n:>6}")
 
     pooled = pd.concat(folds, ignore_index=True)
-    row = _rookie_metrics(pooled, 0)
+    row = _no_baseline_metrics(pooled, 0)
     print(f"  {'pooled':>6} {row['n']:>5} {row['mae']:>6.2f} {row['r2']:>6.3f} "
           f"{row['spearman']:>6.3f} | {row['naive_mae']:>9.2f} {row['naive_spearman']:>9.3f} | "
           f"{row['adp_spearman']:>7.3f} {row['model_spearman_vs_adp']:>9.3f} {row['adp_n']:>6}")
 
-    games = _games_metrics_rookie(pd.concat(games_folds, ignore_index=True))
+    games = _games_metrics_no_baseline(pd.concat(games_folds, ignore_index=True))
     print(f"  Games played, pooled over the whole cohort including true zeros "
           f"(n={games['games_n']}): MAE={games['games_mae']:.2f} vs {games['games_naive_mae']:.2f} "
           f"for always guessing the cohort mean")
 
 
-def _games_metrics_rookie(games_fold: pd.DataFrame) -> dict:
-    """Rookie availability error, against always guessing the cohort's mean games played.
+def _games_metrics_no_baseline(games_fold: pd.DataFrame) -> dict:
+    """Unproven-player availability error, against always guessing the cohort's mean games played.
 
     The veteran baseline (`weighted_games_per_season`) doesn't exist here for the same reason the
-    scoring one doesn't — there is no prior season to average.
+    scoring one doesn't — there is no qualifying prior season to average.
     """
     return {
         "games_n": len(games_fold),
@@ -758,7 +824,7 @@ def build_inhouse_projections() -> None:
     con = duckdb.connect(str(WAREHOUSE_PATH))
     con.create_function("normalize_team", normalize_team, ["VARCHAR"], "VARCHAR")
     df = con.execute(_FEATURE_SQL).df()
-    rookies = con.execute(_ROOKIE_FEATURE_SQL).df()
+    unproven = con.execute(_NO_BASELINE_FEATURE_SQL).df()
     season_games = dict(con.execute(_SEASON_GAMES_SQL).fetchall())
     con.close()
 
@@ -833,28 +899,28 @@ def build_inhouse_projections() -> None:
     # One table rather than two so that role_games below is normalised over one combined
     # population, and so every consumer (consensus.py, breakout_candidates.py) picks rookies up
     # without needing to know there are two models behind the column.
-    rookies = _add_position_dummies(rookies)
-    rookie_labeled = rookies[rookies["actual_ppg_ppr"].notna()].sort_values("target_season")
-    rookie_cohort = rookies[rookies["actual_games"].notna()].sort_values("target_season")
-    rookie_folds, rookie_games_folds, rookie_metrics = _walk_forward_rookies(
-        rookie_labeled, rookie_cohort, fold_seasons
+    unproven = _add_position_dummies(unproven)
+    unproven_labeled = unproven[unproven["actual_ppg_ppr"].notna()].sort_values("target_season")
+    unproven_cohort = unproven[unproven["actual_games"].notna()].sort_values("target_season")
+    unproven_folds, unproven_games_folds, unproven_metrics = _walk_forward_no_baseline(
+        unproven_labeled, unproven_cohort, fold_seasons
     )
-    if not rookie_metrics.empty:
-        _print_rookie_report(rookie_metrics, rookie_folds, rookie_games_folds)
-        metrics = pd.concat([metrics, rookie_metrics], ignore_index=True)
-    output_frames.extend(rookie_folds)
+    if not unproven_metrics.empty:
+        _print_no_baseline_report(unproven_metrics, unproven_folds, unproven_games_folds)
+        metrics = pd.concat([metrics, unproven_metrics], ignore_index=True)
+    output_frames.extend(unproven_folds)
 
-    live_rookies = rookies[rookies["target_season"] == live_season].copy()
-    if not rookie_labeled.empty and not live_rookies.empty:
-        live_rookies["predicted_ppg_ppr"] = _fit_generic(
-            rookie_labeled, _ROOKIE_FEATURE_COLUMNS, "actual_ppg_ppr"
-        ).predict(live_rookies[_ROOKIE_FEATURE_COLUMNS])
-        live_rookies["expected_games"] = _fit_generic(
-            rookie_cohort, _ROOKIE_GAMES_FEATURE_COLUMNS, "actual_games"
-        ).predict(live_rookies[_ROOKIE_GAMES_FEATURE_COLUMNS])
-        output_frames.append(live_rookies)
-        print(f"\nRookie arm: {len(live_rookies)} first-season players projected for "
-              f"{live_season}, trained on {len(rookie_labeled)} labelled rookie seasons.")
+    live_unproven = unproven[unproven["target_season"] == live_season].copy()
+    if not unproven_labeled.empty and not live_unproven.empty:
+        live_unproven["predicted_ppg_ppr"] = _fit_generic(
+            unproven_labeled, _NO_BASELINE_FEATURE_COLUMNS, "actual_ppg_ppr"
+        ).predict(live_unproven[_NO_BASELINE_FEATURE_COLUMNS])
+        live_unproven["expected_games"] = _fit_generic(
+            unproven_cohort, _NO_BASELINE_GAMES_FEATURE_COLUMNS, "actual_games"
+        ).predict(live_unproven[_NO_BASELINE_GAMES_FEATURE_COLUMNS])
+        output_frames.append(live_unproven)
+        print(f"\nUnproven arm: {len(live_unproven)} players with no qualifying prior season "
+              f"projected for {live_season}, trained on {len(unproven_labeled)} labelled seasons.")
 
     result = pd.concat(output_frames, ignore_index=True)
     result["season_games"] = result["target_season"].map(season_games)
