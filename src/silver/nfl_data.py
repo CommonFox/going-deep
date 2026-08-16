@@ -39,9 +39,23 @@ def _load_parquet_to_table(raw_path: Path, table_name: str) -> None:
     print(f"Loaded {raw_path} into {WAREHOUSE_PATH} (table: {table_name})")
 
 
+# nflverse retired the `player_stats` release in favour of `stats_player`, but nfl_data_py 0.3.3
+# (the latest release, and seemingly unmaintained) still requests the old path — so
+# import_weekly_data 404s for any season published after the switch while silently continuing to
+# work for older ones. Read the current release directly rather than pinning the warehouse to
+# whatever the last season in the retired release happened to be.
+_STATS_PLAYER_URL = (
+    "https://github.com/nflverse/nflverse-data/releases/download/stats_player/"
+    "stats_player_week_{season}.parquet"
+)
+
+
 def fetch_weekly_stats(seasons: list[int]) -> Path:
     """Fetch weekly player stats for the given seasons and save raw to parquet."""
-    df = nfl.import_weekly_data(seasons)
+    df = pd.concat(
+        [pd.read_parquet(_STATS_PLAYER_URL.format(season=season)) for season in sorted(seasons)],
+        ignore_index=True,
+    )
     return _save_raw(df, f"weekly_{_seasons_label(seasons)}")
 
 
@@ -94,18 +108,25 @@ def load_injuries(raw_path: Path) -> None:
     _load_parquet_to_table(raw_path, "injuries")
 
 
-def fetch_seasonal_data(seasons: list[int]) -> Path:
-    """Fetch season-level aggregated stats for the given seasons and save raw to parquet."""
-    df = nfl.import_seasonal_data(seasons)
-    return _save_raw(df, f"seasonal_{_seasons_label(seasons)}")
+# fetch_seasonal_data/load_seasonal_data used to live here, sourced from nfl_data_py's
+# import_seasonal_data — which reads the same retired `player_stats` release as import_weekly_data
+# and 404s for the same reason. Nothing in src/ ever read the seasonal_data table, and the
+# replacement release (stats_player_reg) has a different shape, so it was dropped rather than
+# repointed. Season-level aggregates are derivable from weekly_stats if they're ever wanted.
 
 
-def load_seasonal_data(raw_path: Path) -> None:
-    _load_parquet_to_table(raw_path, "seasonal_data")
+# nflverse reshaped depth charts from 2025 on: the old per-week rows (season/week/club_code/
+# depth_team/...) became dated snapshots (dt/team/pos_grp/pos_rank/...) with no season or week
+# column at all. Concatenating the two just unions their columns and leaves 2025 with a null
+# season, so seasons past the break are dropped rather than silently half-loaded. Nothing in src/
+# reads depth_charts yet; wiring the new format in (deriving season/week from `dt`) is its own
+# piece of work, and belongs with whatever first needs a role/snap-share feature.
+_DEPTH_CHART_SCHEMA_BREAK = 2025
 
 
 def fetch_depth_charts(seasons: list[int]) -> Path:
     """Fetch weekly depth charts for the given seasons and save raw to parquet."""
+    seasons = [s for s in seasons if s < _DEPTH_CHART_SCHEMA_BREAK]
     df = nfl.import_depth_charts(seasons)
     return _save_raw(df, f"depth_charts_{_seasons_label(seasons)}")
 
@@ -187,20 +208,18 @@ def load_ids(raw_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    # 2015-2024: enough draft classes for recency-weighted backtesting while staying in the
-    # modern pass-heavy/PPR era. 2025 is excluded even though it's been played — nflverse hasn't
-    # published its weekly/seasonal player-stats release for that season yet (schedules, rosters,
-    # snap counts, injuries, and depth charts are all already available for 2025, but a season
-    # with no fantasy-points outcome data isn't useful here, so it's left out entirely for
-    # consistency). 2026 is excluded since it hasn't been played yet.
-    seasons = list(range(2015, 2025))
+    # 2015-2025: enough draft classes for recency-weighted backtesting while staying in the modern
+    # pass-heavy/PPR era. 2025 was previously excluded on the belief that nflverse hadn't published
+    # its player stats yet; in fact nflverse had moved them to the `stats_player` release and
+    # nfl_data_py was still asking for the retired one (see _STATS_PLAYER_URL). 2026 is excluded
+    # since it hasn't been played yet — it's the season the models project, not train on.
+    seasons = list(range(2015, 2026))
 
     load_weekly_stats(fetch_weekly_stats(seasons))
     load_schedules(fetch_schedules(seasons))
     load_rosters(fetch_rosters(seasons))
     load_snap_counts(fetch_snap_counts(seasons))
     load_injuries(fetch_injuries(seasons))
-    load_seasonal_data(fetch_seasonal_data(seasons))
     load_depth_charts(fetch_depth_charts(seasons))
     load_ids(fetch_ids())
     load_players(fetch_players())
