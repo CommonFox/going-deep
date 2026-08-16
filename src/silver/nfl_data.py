@@ -117,15 +117,14 @@ def load_injuries(raw_path: Path) -> None:
 
 # nflverse reshaped depth charts from 2025 on: the old per-week rows (season/week/club_code/
 # depth_team/...) became dated snapshots (dt/team/pos_grp/pos_rank/...) with no season or week
-# column at all. Concatenating the two just unions their columns and leaves 2025 with a null
-# season, so seasons past the break are dropped rather than silently half-loaded. Nothing in src/
-# reads depth_charts yet; wiring the new format in (deriving season/week from `dt`) is its own
-# piece of work, and belongs with whatever first needs a role/snap-share feature.
+# column at all. The two can't share a table — concatenating them just unions the columns and
+# leaves every 2025 row with a null season — so each era is archived and loaded in its own shape,
+# and src/gold/depth_charts.py reconciles them into one weekly view.
 _DEPTH_CHART_SCHEMA_BREAK = 2025
 
 
 def fetch_depth_charts(seasons: list[int]) -> Path:
-    """Fetch weekly depth charts for the given seasons and save raw to parquet."""
+    """Fetch legacy per-week depth charts (pre-2025 format) and save raw to parquet."""
     seasons = [s for s in seasons if s < _DEPTH_CHART_SCHEMA_BREAK]
     df = nfl.import_depth_charts(seasons)
     return _save_raw(df, f"depth_charts_{_seasons_label(seasons)}")
@@ -133,6 +132,23 @@ def fetch_depth_charts(seasons: list[int]) -> Path:
 
 def load_depth_charts(raw_path: Path) -> None:
     _load_parquet_to_table(raw_path, "depth_charts")
+
+
+def fetch_depth_chart_snapshots(seasons: list[int]) -> Path:
+    """Fetch dated depth-chart snapshots (2025-on format) and save raw to parquet."""
+    seasons = [s for s in seasons if s >= _DEPTH_CHART_SCHEMA_BREAK]
+    df = nfl.import_depth_charts(seasons)
+    # The snapshot feed carries no season column — it's implicit in the release requested — so it's
+    # stamped on here. Without it a multi-season archive couldn't be told apart after the fact, and
+    # a snapshot's own `dt` can't stand in: a season's snapshots run from the previous August into
+    # the following March, so calendar year and season year disagree for a third of them.
+    df["season"] = df["dt"].str.slice(0, 4).astype(int)
+    df.loc[df["dt"].str.slice(5, 7) < "07", "season"] -= 1
+    return _save_raw(df, f"depth_chart_snapshots_{_seasons_label(seasons)}")
+
+
+def load_depth_chart_snapshots(raw_path: Path) -> None:
+    _load_parquet_to_table(raw_path, "depth_chart_snapshots")
 
 
 def fetch_players() -> Path:
@@ -221,6 +237,7 @@ if __name__ == "__main__":
     load_snap_counts(fetch_snap_counts(seasons))
     load_injuries(fetch_injuries(seasons))
     load_depth_charts(fetch_depth_charts(seasons))
+    load_depth_chart_snapshots(fetch_depth_chart_snapshots(seasons))
     load_ids(fetch_ids())
     load_players(fetch_players())
     load_ngs_data(fetch_ngs_data(seasons))
