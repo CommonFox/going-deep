@@ -15,7 +15,7 @@ the season being predicted doesn't exist yet, so this stays a strictly prior-yea
   resulting NaN natively, no imputation needed.
 
 Plus a career block that is instead as of `target_season` itself — `seasons_of_experience`,
-`age_at_season`, `draft_round`, `draft_pick`. Age and years-in-league for the season being
+`age_at_season`, `draft_pick`. Age and years-in-league for the season being
 predicted are fixed and knowable before it starts, so using them isn't leakage the way a
 performance stat would be. Without these the model had no way to represent a player's place on
 the experience curve at all: its whole view of a high-scoring second-year player was last year's
@@ -36,9 +36,12 @@ Only two cohorts ever get a *stored* prediction, both produced without seeing th
   from the projection that actually matters once the honest backtest above has already run.
 
 `projected_points` (season-total, matching the units every other source in `consensus.py` uses) is
-`predicted_ppg_ppr * expected_games`, where `expected_games` is the same
-`weighted_games_per_season` durability signal used as a model input — decoupling "how good per
-game" (learned) from "how many games will they play" (a recency-weighted historical rate).
+`predicted_ppg_ppr * expected_games`. The two halves are predicted separately, by models with
+different feature sets, because "how good per game" and "how many games will they play" are
+different questions — prior-year scoring rate says nothing about availability, and the role signals
+that do carry it (see `_GAMES_FEATURE_COLUMNS`) say little about scoring. Expect the games half to
+stay weak whatever is thrown at it: most of what decides availability is injury luck, which nothing
+in this warehouse observes.
 """
 
 from pathlib import Path
@@ -59,6 +62,17 @@ _BASE_FEATURES = [
     "seasons_of_experience", "age_at_season", "draft_pick",
 ]
 _FEATURE_COLUMNS = _BASE_FEATURES + [f"position_{p}" for p in _SKILL_POSITIONS]
+
+# Availability is its own question, so it gets its own model rather than sharing the PPG feature
+# set. Prior-year scoring rate says nothing about whether a player will be on the field, and the
+# role block (how many weeks he appeared on a depth chart, how often as a starter, and whether he
+# finished there) is the part that distinguishes "wasn't the starter yet" from "kept getting hurt"
+# — two stories a games-played average alone tells identically.
+_GAMES_FEATURE_COLUMNS = [
+    "weighted_games_per_season", "seasons_used",
+    "seasons_of_experience", "age_at_season", "draft_pick",
+    "weeks_on_depth_chart", "starter_share", "end_starter",
+] + [f"position_{p}" for p in _SKILL_POSITIONS]
 
 # Conservative for a dataset this small (a few hundred rows per cohort): shallow trees, a decent
 # per-leaf sample floor, and a gentle learning rate all guard against overfitting what little data
@@ -101,13 +115,29 @@ actual_outcomes AS (
     SELECT
         player_id,
         season AS target_season,
-        SUM(fantasy_points_ppr) / COUNT(*) AS actual_ppg_ppr
+        SUM(fantasy_points_ppr) / COUNT(*) AS actual_ppg_ppr,
+        COUNT(*) AS actual_games
     FROM weekly_stats
     WHERE season_type = 'REG'
         AND fantasy_points_ppr IS NOT NULL
         AND position IN {_SKILL_POSITIONS}
     GROUP BY player_id, season
     HAVING COUNT(*) >= {_MIN_GAMES_PLAYED}
+),
+-- Role as of target_season - 1, which is what separates "wasn't the starter yet" from "kept
+-- getting hurt" — two very different stories that a games-played average alone tells identically.
+-- end_starter deliberately reads the *last* week the player appears rather than the season as a
+-- whole: a rookie who takes the job over in week 4 finishes as the starter, and that's the better
+-- statement about next season than a share diluted by the weeks he spent behind someone else.
+prior_role AS (
+    SELECT
+        season,
+        gsis_id,
+        COUNT(*) AS weeks_on_depth_chart,
+        AVG(CASE WHEN is_starter THEN 1.0 ELSE 0.0 END) AS starter_share,
+        CAST(ARG_MAX(is_starter, week) AS BIGINT) AS end_starter
+    FROM player_depth_chart
+    GROUP BY season, gsis_id
 )
 SELECT
     b.target_season,
@@ -136,7 +166,11 @@ SELECT
     -- out: pick number already encodes it, and carrying both scored marginally worse in the
     -- walk-forward backtest while adding no permutation importance.
     pl.draft_pick,
-    o.actual_ppg_ppr
+    pr.weeks_on_depth_chart,
+    pr.starter_share,
+    pr.end_starter,
+    o.actual_ppg_ppr,
+    o.actual_games
 FROM player_weighted_baselines b
 LEFT JOIN player_team pt ON pt.player_id = b.player_id AND pt.season = b.target_season - 1
 LEFT JOIN offensive_line_grades ol ON ol.team = pt.team AND ol.season = b.target_season - 1
@@ -147,6 +181,7 @@ LEFT JOIN skill_position_grades sk
 -- 2022 season), so applying it to a historical row would leak how the career eventually turned
 -- out. rookie_season and birth_date are immutable, so deriving from them is safe at any season.
 LEFT JOIN players pl ON pl.gsis_id = b.player_id
+LEFT JOIN prior_role pr ON pr.gsis_id = b.player_id AND pr.season = b.target_season - 1
 LEFT JOIN actual_outcomes o ON o.player_id = b.player_id AND o.target_season = b.target_season
 -- Not cosmetic: DuckDB's parallel joins return these rows in a different order from run to run,
 -- and HistGradientBoostingRegressor sums gradients per histogram bin in row order. Float addition
@@ -170,6 +205,12 @@ def _add_position_dummies(df: pd.DataFrame) -> pd.DataFrame:
 def _fit(train: pd.DataFrame) -> HistGradientBoostingRegressor:
     model = HistGradientBoostingRegressor(**_MODEL_PARAMS)
     model.fit(train[_FEATURE_COLUMNS], train["actual_ppg_ppr"])
+    return model
+
+
+def _fit_games(train: pd.DataFrame) -> HistGradientBoostingRegressor:
+    model = HistGradientBoostingRegressor(**_MODEL_PARAMS)
+    model.fit(train[_GAMES_FEATURE_COLUMNS], train["actual_games"])
     return model
 
 
@@ -202,6 +243,17 @@ def build_inhouse_projections() -> None:
             f"-> MAE={mae:.2f} R2={r2:.2f}"
         )
 
+        holdout["expected_games"] = _fit_games(train).predict(holdout[_GAMES_FEATURE_COLUMNS])
+        # Reported against the weighted average this model replaces, since "better than no model"
+        # is the only claim worth making about a target this noisy — most of what decides games
+        # played is injury luck, which nothing here observes.
+        games_mae = mean_absolute_error(holdout["actual_games"], holdout["expected_games"])
+        naive_mae = mean_absolute_error(holdout["actual_games"], holdout["weighted_games_per_season"])
+        print(
+            f"Games holdout: MAE={games_mae:.2f} vs {naive_mae:.2f} for the weighted average "
+            f"it replaces"
+        )
+
         # Out-of-sample (on the holdout, not train) so a feature the model overfit to doesn't look
         # important just because it memorized train-set noise. Answers "do the team-context signals
         # (ol_grade/skill_grade) actually carry weight" rather than assuming they do because they're
@@ -230,13 +282,14 @@ def build_inhouse_projections() -> None:
     if not labeled.empty:
         final_model = _fit(labeled)
         live["predicted_ppg_ppr"] = final_model.predict(live[_FEATURE_COLUMNS])
+        live["expected_games"] = _fit_games(labeled).predict(live[_GAMES_FEATURE_COLUMNS])
     else:
         live["predicted_ppg_ppr"] = float("nan")
+        live["expected_games"] = float("nan")
         print("No labeled seasons available yet — live cohort predictions left null.")
     output_frames.append(live)
 
     result = pd.concat(output_frames, ignore_index=True)
-    result["expected_games"] = result["weighted_games_per_season"]
     result["projected_points"] = result["predicted_ppg_ppr"] * result["expected_games"]
     result = result[[
         "player_id", "player_name", "position", "target_season",
