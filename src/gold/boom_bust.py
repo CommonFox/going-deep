@@ -141,7 +141,8 @@ untracked AS (
     FROM points_over_replacement por
     WHERE NOT EXISTS (
         SELECT 1 FROM preseason pre
-        WHERE pre.gsis_id = por.player_id AND pre.season = por.season AND pre.position = por.position
+        WHERE pre.gsis_id = por.player_id AND pre.season = por.season
+            AND pre.position = por.position
     )
 ),
 combined AS (SELECT * FROM tracked UNION ALL SELECT * FROM untracked),
