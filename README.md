@@ -111,8 +111,24 @@ network access of their own.
   only counts toward the baseline if the player played at least 6 games in it, so an
   injury-shortened or backup-role cameo doesn't distort the per-game rate. Also outputs
   `weighted_games_per_season`, the same recency-weighted average applied to games played instead —
-  a durability signal. A feature-engineering building block, not a projection itself. Pure SQL
-  over already-loaded tables — no fetch step, no network.
+  a durability signal.
+
+  A points-per-game number alone throws away everything about *how* those points were earned,
+  which is most of what makes next season predictable — volume is far more stable year over year
+  than touchdown rate, so 17 PPG on 9 targets a game means something very different from 17 PPG on
+  4 targets and triple the league's touchdown rate. The same recency weighting is therefore also
+  applied to a component block: **volume** (targets/receptions/carries/attempts/yards/touchdowns
+  per game, with touchdowns kept separate from yards so an unsustainable scoring rate stays its own
+  visible signal), **role** (target share, air-yards share, WOPR, and snap share joined from
+  `snap_counts` through the `ids` crosswalk at 99%+ coverage), and **efficiency** (passing/rushing/
+  receiving EPA and CPOE, left NULL where a position doesn't do that thing rather than zero-filled,
+  so "didn't do this" stays distinguishable from "did this badly"). Plus
+  `weighted_td_regressed_ppg` — PPG recomputed with the player's own touchdowns swapped for the
+  touchdowns their yardage would have produced at that season's league-average rate, per position
+  but falling back to a pooled rate where a position-season is too thin to estimate from (RBs threw
+  for 3 touchdowns on 9 yards league-wide in 2024, a rate of 0.33 touchdowns *per yard*). A
+  feature-engineering building block, not a projection itself. Pure SQL over already-loaded
+  tables — no fetch step, no network.
 - `src/gold/league_settings.py` — builds `league_settings`: one row per league (Sleeper, ESPN)
   normalizing each platform's scoring rules (points per reception/yard/TD/turnover, etc.) and
   starting-roster construction (team count and QB/RB/WR/TE/FLEX/superflex/bench/IR slot counts)
@@ -125,7 +141,8 @@ network access of their own.
   loaded tables — no fetch step, no network.
 - `src/gold/inhouse_projections.py` — builds `inhouse_projections`: a home-grown PPG projection
   from a gradient-boosted model (scikit-learn's `HistGradientBoostingRegressor`), trained on a
-  shift-based setup — `player_weighted_baselines` plus prior-season `offensive_line_grades`/
+  shift-based setup — `player_weighted_baselines` (its full volume/role/efficiency component block,
+  not just `weighted_ppg_ppr`) plus prior-season `offensive_line_grades`/
   `skill_position_grades` as features, actual next-season PPG as the label — then converted to a
   season-total point projection. Emits that total twice, because the model and the external sites
   don't answer the same question: `projected_points_full` (PPG x season length, read from

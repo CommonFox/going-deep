@@ -62,15 +62,24 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, r2_score
 
-from src.gold.player_baselines import _MIN_GAMES_PLAYED, _SKILL_POSITIONS
+from src.gold.player_baselines import (
+    _COMPONENT_COLUMNS,
+    _MIN_GAMES_PLAYED,
+    _SKILL_POSITIONS,
+)
 from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
+# _COMPONENT_COLUMNS is imported rather than restated so that a column added to
+# player_baselines.py reaches the model automatically instead of being built and then silently
+# ignored. It's the volume/role/efficiency block: how the player's prior scoring was actually
+# earned, which is the part that carries across a change of team or role, where a bare
+# points-per-game average carries nothing.
 _BASE_FEATURES = [
     "weighted_ppg_ppr", "weighted_games_per_season", "seasons_used", "ol_grade", "skill_grade",
     "seasons_of_experience", "age_at_season", "draft_pick",
-]
+] + _COMPONENT_COLUMNS
 _FEATURE_COLUMNS = _BASE_FEATURES + [f"position_{p}" for p in _SKILL_POSITIONS]
 
 # Availability is its own question, so it gets its own model rather than sharing the PPG feature
@@ -112,6 +121,8 @@ FROM schedules
 WHERE game_type = 'REG'
 GROUP BY season
 """
+
+_COMPONENT_SELECTS = ",\n".join(f"    b.{column}" for column in _COMPONENT_COLUMNS)
 
 # player_team resolves each player's most-played team in a season (mirrors the
 # team_by_player_season pattern in skill_position_grades.py, over weekly_stats instead of
@@ -173,6 +184,7 @@ SELECT
     b.seasons_used,
     b.weighted_ppg_ppr,
     b.weighted_games_per_season,
+{_COMPONENT_SELECTS},
     pt.team,
     ol.ol_grade,
     sk.grade AS skill_grade,
