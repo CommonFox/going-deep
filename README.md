@@ -163,7 +163,22 @@ network access of their own.
   keeps the role discount the sites apply but drops the injury discount they don't, by measuring a
   player's expected games against a starter's at the same position and season. Season length is
   read from `schedules` rather than hardcoded to 17, since the warehouse still holds 16-game
-  seasons. Both totals depend on `expected_games`, whose label is anchored on the **roster** rather
+  seasons.
+
+  A floor and a ceiling come out alongside the expectation, from the same features and estimator
+  refit under the pinball loss: `ppg_p10`/`ppg_p90`, the season totals `projected_points_floor`/
+  `projected_points_ceiling`, and `upside` as the gap between ceiling and expectation. A conditional
+  mean cannot tell a season-long RB2 from a backup one injury away from a starter's workload, which
+  is exactly what "who might boom" is asking. Both are reported as measured: the ceiling is well
+  calibrated out-of-sample (89.9% of actual veteran seasons land under `ppg_p90` against a 90%
+  target, no crossed intervals) while the floor sits too high (15.4% under `ppg_p10` against 10%),
+  because the scoring label's games floor excludes short seasons so nothing teaches the model how
+  far down a bad one goes. `upside` earns its place modestly — holding the mean projection fixed
+  within quintiles, the high-upside half beats its own projection by 3+ PPG 15.5% of the time
+  against 11.9% (z=2.51, p=0.012, n=2416), positive in all five quintiles, dying by a 5-PPG
+  threshold. It tilts the odds; it is not a boom detector.
+
+  Both totals depend on `expected_games`, whose label is anchored on the **roster** rather
   than the box score: a player who was in the league all season and never took a snap has no
   `weekly_stats` row at all, so counting only those rows made him read as unobserved instead of as
   the zero he is (~90-110 players a season). Without those zeros the model can't answer below about
@@ -214,14 +229,47 @@ network access of their own.
   season automatically gets a deeper replacement level, with no hardcoded split. Pure SQL/Python
   over already-loaded tables — no fetch step, no network.
 - `src/gold/boom_bust.py` — builds `boom_bust`: classifies each skill-position player-season into
-  a preseason-ADP-relative outcome bucket (Boomed/Returned on ADP/Fine/Busted/Got Injured/No
-  Preseason ADP), by converting both `points_over_replacement` and `adp_consensus`'s
-  `consensus_adp` into percentiles within the same season-position pool of ADP-tracked players, so
-  the comparison is scoring-format- and league-size-independent rather than a fixed PPG number or
-  ADP-spot count. Boom/Bust/Fine/Returned split at symmetric +/-20-percentile-point bands around
-  "met expectation"; fewer than 12 games played overrides those bands as Got Injured, but only for
-  players who had preseason draft capital to begin with. Pure SQL over already-loaded tables — no
-  fetch step, no network.
+  an outcome bucket (League Winner/Delivered/Beat His Price/Met His Price/Fine/Busted/Got Injured/
+  Never Had The Job/No Preseason ADP), measured on an **absolute** scale rather than a relative
+  one. `finish_tier` buckets a positional finish into groups of `team_count` — the RB1/RB2/WR3
+  language, derived rather than hardcoded to 12 — `expected_tier` applies the same width to the
+  player's rank by preseason ADP, and `is_elite_finish` asks the uncensored question "was he a
+  top-`team_count` asset". `tier_delta` and the continuous `percentile_delta` keep the relative
+  "did he beat his price" read alongside, but no longer define the bucket.
+
+  That split is a deliberate correction. Defining a boom as a +20-percentile-point *move* made it
+  structurally unreachable from the top of the board — a first-round pick already sits near the
+  99th percentile — so the table reported a 0% boom rate for rounds 1-4 and ~25% for round 15
+  regardless of what those players did. On the absolute measure the rate falls 62.8% -> 6.4% from
+  round 1 to round 15, which is the real shape. The old single "Got Injured" bucket is likewise
+  split from "Never Had The Job", since conflating the fallen star with the career backup made
+  injuries look like they climbed 18% -> 30% with ADP round when late picks are simply backups who
+  were never going to play; splitting on whether a player started in the majority of the weeks he
+  actually appeared separates them cleanly (mean ADP 147 vs 276). Pure SQL over already-loaded
+  tables — no fetch step, no network.
+- `src/gold/draft_value.py` — builds `draft_value`: what each player returned (or is projected to
+  return) *over what he cost*, which is the question a draft actually turns on and which neither
+  `points_over_replacement` nor `adp_consensus` answers alone. `expected_value` is an isotonic
+  regression of realised value on `consensus_adp`, fit per league and position — isotonic because
+  the one thing known a priori is the shape (later picks return less, monotonically) — and fit
+  walk-forward, so no season is scored against a benchmark that had already seen it. Subtracting
+  gives `surplus_value` (backward-looking, the study column) and `projected_surplus` (forward-
+  looking, the draft board, from `inhouse_projections`).
+
+  Value is `points_over_replacement` **floored at zero**, because nobody is forced to start a
+  player worse than the waiver wire. That isn't cosmetic: on signed PoR the expected curve for a QB
+  at pick 235 sits near -139, so eight quarterbacks projected *below* replacement ranked in the top
+  25 of the 2026 board. They weren't beating their price, they were being less bad than a floor set
+  by how deep their position's replacement level is. Sorting past seasons into deciles by the
+  preseason call, the bottom decile realised -2.3 surplus and the top +16.6, with the share beating
+  their price rising 36% -> 54%; ADP is ~orthogonal to surplus by construction, so that is signal
+  genuinely additional to what the market prices. One measured caveat is recorded in the module:
+  the drafted pool's mean value swings ~6 points a season for reasons no preseason curve can see
+  and no training window removes, so surplus is a **within-season ranking** rather than a
+  calibrated point total — hence `surplus_rank`/`projected_surplus_rank` and `surplus_centered`.
+  `inhouse_projections`' full-PPR points are put on each league's scale by a through-origin
+  per-position coefficient (R2 0.996-1.000), and the projected replacement level reuses
+  `points_over_replacement`'s own `_replacement_levels` so the two definitions can't drift apart.
 - `src/gold/breakout_candidates.py` — builds `breakout_candidates`: ranks `inhouse_projections`'
   already-ADP-blind prediction into a position-relative percentile per target season and lines it
   up against `adp_consensus`'s preseason percentile, so a player the model likes that the real-world
