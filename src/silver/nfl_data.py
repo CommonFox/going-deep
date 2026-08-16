@@ -236,18 +236,25 @@ if __name__ == "__main__":
     # Bump _UPCOMING_SEASON once a year, after the last one has been played out.
     played_seasons = list(range(2015, _UPCOMING_SEASON))
 
-    # Two of these feeds describe a season *before* it's played rather than after, and the upcoming
-    # season is exactly the one the models project — so they're fetched a year further forward than
-    # everything else. The schedule is published in May; depth-chart snapshots run from the March
-    # after the previous season right through the summer, which is what lets inhouse_projections
-    # know who is actually starting for the season it's projecting rather than inferring role from
-    # last year's box scores. Every other feed here is a record of games already played, and asking
-    # for a season that hasn't happened returns nothing.
+    # Three of these feeds describe a season *before* it's played rather than after, and the
+    # upcoming season is exactly the one the models project — so they're fetched a year further
+    # forward than everything else. The schedule is published in May; depth-chart snapshots run
+    # from the March after the previous season right through the summer, which is what lets
+    # inhouse_projections know who is actually starting for the season it's projecting rather than
+    # inferring role from last year's box scores; and preseason rosters carry `draft_number` and
+    # `years_exp`, which is how the rookie arm gets draft capital and identifies a first-season
+    # player at all. Every other feed here is a record of games already played, and asking for a
+    # season that hasn't happened returns nothing.
+    #
+    # Rosters specifically: the `players` release is the more natural home for draft capital, but
+    # nflverse publishes it there on a long lag — as of the 2026 preseason it still had no 2026
+    # draft class at all, while the roster feed already carried the full board. Reading draft
+    # capital from rosters is what makes the rookie arm work in the season it's needed.
     forward_looking_seasons = played_seasons + [_UPCOMING_SEASON]
 
     load_weekly_stats(fetch_weekly_stats(played_seasons))
     load_schedules(fetch_schedules(forward_looking_seasons))
-    load_rosters(fetch_rosters(played_seasons))
+    load_rosters(fetch_rosters(forward_looking_seasons))
     load_snap_counts(fetch_snap_counts(played_seasons))
     load_injuries(fetch_injuries(played_seasons))
     load_depth_charts(fetch_depth_charts(played_seasons))

@@ -24,10 +24,11 @@ network access of their own.
 - `src/silver/nfl_data.py` — nflverse data via `nfl_data_py`: weekly stats, schedules, rosters,
   snap counts, injuries, seasonal data, depth charts, player bios, Next Gen Stats, FTN charting
   data, PFR advanced pass/rush stats, and a cross-platform player ID crosswalk. Most feeds are a
-  record of games already played and stop at the last completed season, but schedules and
-  depth-chart snapshots describe a season *before* it's played — the schedule is published in May,
-  snapshots run from the previous March through the summer — so both are fetched a year further
-  forward, which is what gives `inhouse_projections` a role signal for the season it projects.
+  record of games already played and stop at the last completed season, but schedules, depth-chart
+  snapshots and rosters all describe a season *before* it's played — the schedule is published in
+  May, snapshots run from the previous March through the summer, and preseason rosters carry
+  `draft_number`/`years_exp` — so those three are fetched a year further forward. That is what
+  gives `inhouse_projections` a role signal and a rookie draft board for the season it projects.
   Bump `_UPCOMING_SEASON` once a year.
 - `src/silver/sleeper.py` — Sleeper's public league API (no auth required): league settings,
   rosters, users, weekly matchups (including starting lineups), transactions, current NFL state,
@@ -166,7 +167,23 @@ network access of their own.
   `weekly_stats`, so a player who never takes a snap has no row to count and the label bottoms out
   at 1 game rather than 0 — career backups are projected for more games than they'll play, and the
   walk-forward can't see it, because the scoring label's games floor excludes exactly those
-  players. The only `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over
+  players.
+
+  A second, much smaller model covers **first-season players**, who have no prior-season history
+  for any of the above to read and so were absent from the table entirely (150 players ESPN
+  projected and this warehouse didn't, the whole incoming rookie class among them). It reads what a
+  human reads for a rookie: draft capital, the landing spot's line and skill-corps grades, and
+  whether he has already won a week 1 job. Its cohort — every first-season player reaching that
+  season's week 1 depth chart — is a *closed* population, which makes its availability label the
+  one genuinely uncensored label here: a rookie with no `weekly_stats` row didn't play, so 0 is
+  honest rather than missing. Draft capital comes from `rosters.draft_number` rather than
+  `players.draft_pick`, which is the more natural home for it but lags by months and carried no
+  2026 class at all during the 2026 preseason. Both arms write to the same table, so `role_games`
+  normalises over one combined population and consumers don't need to know there are two models
+  behind the column. Backtested the same walk-forward way, the rookie arm is the one place in this
+  warehouse that **beats** preseason ADP at ranking (Spearman 0.620 vs 0.503 pooled over 2020-2025),
+  which is less surprising than it sounds: rookie ADP is hype-driven, while draft slot and a won
+  job are not. The only `src/gold` module that isn't pure SQL (Python/pandas/scikit-learn over
   already-loaded tables instead). Feeds into `consensus.py` as a fifth projection source.
 
   Also builds `inhouse_backtest`, the accept/reject instrument for any future change to the model:
