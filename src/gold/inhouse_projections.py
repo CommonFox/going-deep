@@ -84,6 +84,26 @@ points per game across a full 17. Their product is what `projected_points_full` 
 comparable to, so it keeps the role discount and drops the injury one. `_role_games` does that by
 measuring a player's expected games against a starter's at the same position and season.
 
+A floor and a ceiling come out alongside the expectation, from the same features and estimator refit
+under the pinball loss: `ppg_p10` / `ppg_p90`, and the season totals `projected_points_floor` /
+`projected_points_ceiling` on the same games basis as `projected_points`. `upside` is the gap
+between the ceiling and the expectation — the "might he boom" score, which is not recoverable from
+`projected_points`, since two players can share a projection and not share a distribution.
+
+Both are reported as measured rather than assumed:
+- Calibration is checked out-of-sample on every walk-forward fold (`_print_quantile_report`). The
+  ceiling is honest — 89.9% of actual veteran seasons land under `ppg_p90` against a 90% target,
+  with no crossed intervals. The floor is not: 15.4% land under `ppg_p10` against a 10% target, so
+  it sits too high and should be read as optimistic. That is the scoring label's games floor showing
+  through — a season cut short is excluded from training, so nothing ever teaches the model how far
+  down a bad one goes, and the same censoring that makes the label trustworthy for a per-game rate
+  makes the low tail specifically unreliable.
+- `upside` does carry information beyond the mean projection, and not much. Splitting each quintile
+  of `predicted_ppg_ppr` at its median upside, the high-upside half beats its own projection by more
+  than 3 PPG 15.5% of the time against 11.9% for the low-upside half (+3.5pp, z=2.51, p=0.012, over
+  2,416 walk-forward player-seasons), with the lift positive in all five quintiles. It holds to a
+  4-PPG threshold and dies by 5 (p=0.11), so it is a genuine tilt in the odds, not a boom detector.
+
 Both arms' availability labels are anchored on the roster rather than the box score, because a
 player who was in the league all season and never took a snap has no `weekly_stats` row at all and
 would otherwise read as unobserved rather than as the zero he is — roughly 90-110 players a season
@@ -142,6 +162,18 @@ _GAMES_FEATURE_COLUMNS = [
 # per-leaf sample floor, and a gentle learning rate all guard against overfitting what little data
 # there is.
 _MODEL_PARAMS = dict(max_depth=3, min_samples_leaf=15, learning_rate=0.1, random_state=0)
+
+# The same estimator refit under the pinball loss, which asks it for a conditional quantile rather
+# than a conditional mean. Two players can share a projected PPG and be completely different draft
+# propositions — the season-long RB2 who will finish within a point of his number either way, and
+# the backup one injury away from a starter's workload — and a point estimate cannot tell them
+# apart. p90 is the ceiling that "which players might boom" is actually asking about; p10 is the
+# floor, which is the same question asked of a roster you already own.
+#
+# Deliberately additional to `predicted_ppg_ppr` rather than replacing it: the median is not the
+# mean, and consensus.py blends this model against external sites that publish means.
+_QUANTILE_LOW = 0.10
+_QUANTILE_HIGH = 0.90
 
 # offensive_line_grades needs target_season - 1 >= 2018 (PFR advanced stats' own floor) before it
 # has any non-null values at all. A walk-forward fold whose entire training slice sits below that
@@ -554,6 +586,21 @@ def _fit_generic(
     return model
 
 
+def _add_quantiles(
+    frame: pd.DataFrame, train: pd.DataFrame, feature_columns: list[str]
+) -> pd.DataFrame:
+    """Attach a floor and a ceiling PPG to `frame`, from models fit on `train` under the pinball
+    loss. Same features and hyperparameters as the mean model — the only thing changing is which
+    part of the conditional distribution is being asked for."""
+    for column, quantile in (("ppg_p10", _QUANTILE_LOW), ("ppg_p90", _QUANTILE_HIGH)):
+        model = HistGradientBoostingRegressor(
+            loss="quantile", quantile=quantile, **_MODEL_PARAMS
+        )
+        model.fit(train[feature_columns], train["actual_ppg_ppr"])
+        frame[column] = model.predict(frame[feature_columns])
+    return frame
+
+
 def _metrics(fold: pd.DataFrame, target_season: int, position: str) -> dict:
     """Score one fold (or one position within it) against every benchmark worth beating.
 
@@ -668,6 +715,7 @@ def _walk_forward_no_baseline(
         if not fold.empty:
             fold["predicted_ppg_ppr"] = scoring_model.predict(fold[_NO_BASELINE_FEATURE_COLUMNS])
             fold["expected_games"] = games_model.predict(fold[_NO_BASELINE_GAMES_FEATURE_COLUMNS])
+            fold = _add_quantiles(fold, train, _NO_BASELINE_FEATURE_COLUMNS)
             # Position means come from the training slice only — a benchmark computed on the fold
             # would have seen the answers the model is being graded against.
             position_means = train.groupby("position")["actual_ppg_ppr"].mean()
@@ -734,6 +782,7 @@ def _walk_forward(
         fold = labeled[labeled["target_season"] == season].copy()
         fold["predicted_ppg_ppr"] = _fit(train).predict(fold[_FEATURE_COLUMNS])
         fold["expected_games"] = games_model.predict(fold[_GAMES_FEATURE_COLUMNS])
+        fold = _add_quantiles(fold, train, _FEATURE_COLUMNS)
         predictions.append(fold)
 
         games_fold = labeled_games[labeled_games["target_season"] == season].copy()
@@ -768,6 +817,7 @@ def _print_no_baseline_report(
     print(f"  Games played, pooled over the whole cohort including true zeros "
           f"(n={games['games_n']}): MAE={games['games_mae']:.2f} vs {games['games_naive_mae']:.2f} "
           f"for always guessing the cohort mean")
+    _print_quantile_report(pooled, "unproven arm")
 
 
 def _games_metrics_no_baseline(games_fold: pd.DataFrame) -> dict:
@@ -818,6 +868,26 @@ def _print_backtest_report(
     print(f"\n  Games played, pooled over every player who appeared (n={games['games_n']}): "
           f"MAE={games['games_mae']:.2f} vs {games['games_naive_mae']:.2f} for the weighted "
           f"average it replaces")
+    _print_quantile_report(pooled, "veteran arm")
+
+
+def _print_quantile_report(pooled: pd.DataFrame, label: str) -> None:
+    """Are the floor and ceiling the quantiles they claim to be?
+
+    An interval is only worth reading if it covers what it says it covers, and a quantile model can
+    be badly calibrated while still scoring well on rank metrics. Empirical coverage is the direct
+    test: the share of actual seasons landing under `ppg_p90` should be about 90%, and under
+    `ppg_p10` about 10%. Reported out-of-sample, pooled over every walk-forward fold.
+    """
+    if "ppg_p90" not in pooled.columns or pooled["ppg_p90"].isna().all():
+        return
+    below_high = (pooled["actual_ppg_ppr"] <= pooled["ppg_p90"]).mean()
+    below_low = (pooled["actual_ppg_ppr"] <= pooled["ppg_p10"]).mean()
+    inverted = (pooled["ppg_p90"] < pooled["ppg_p10"]).sum()
+    print(f"\n  Quantile calibration, {label} (n={len(pooled)}): "
+          f"{100 * below_low:.1f}% of actual seasons under ppg_p10 (target "
+          f"{100 * _QUANTILE_LOW:.0f}%), {100 * below_high:.1f}% under ppg_p90 (target "
+          f"{100 * _QUANTILE_HIGH:.0f}%); {inverted} crossed intervals")
 
 
 def build_inhouse_projections() -> None:
@@ -889,9 +959,12 @@ def build_inhouse_projections() -> None:
         final_model = _fit(labeled)
         live["predicted_ppg_ppr"] = final_model.predict(live[_FEATURE_COLUMNS])
         live["expected_games"] = _fit_games(labeled_games).predict(live[_GAMES_FEATURE_COLUMNS])
+        live = _add_quantiles(live, labeled, _FEATURE_COLUMNS)
     else:
         live["predicted_ppg_ppr"] = float("nan")
         live["expected_games"] = float("nan")
+        live["ppg_p10"] = float("nan")
+        live["ppg_p90"] = float("nan")
         print("No labeled seasons available yet — live cohort predictions left null.")
     output_frames.append(live)
 
@@ -918,6 +991,9 @@ def build_inhouse_projections() -> None:
         live_unproven["expected_games"] = _fit_generic(
             unproven_cohort, _NO_BASELINE_GAMES_FEATURE_COLUMNS, "actual_games"
         ).predict(live_unproven[_NO_BASELINE_GAMES_FEATURE_COLUMNS])
+        live_unproven = _add_quantiles(
+            live_unproven, unproven_labeled, _NO_BASELINE_FEATURE_COLUMNS
+        )
         output_frames.append(live_unproven)
         print(f"\nUnproven arm: {len(live_unproven)} players with no qualifying prior season "
               f"projected for {live_season}, trained on {len(unproven_labeled)} labelled seasons.")
@@ -927,10 +1003,18 @@ def build_inhouse_projections() -> None:
     result["role_games"] = _role_games(result)
     result["projected_points"] = result["predicted_ppg_ppr"] * result["expected_games"]
     result["projected_points_full"] = result["predicted_ppg_ppr"] * result["role_games"]
+    # Season totals on the same games basis as `projected_points`, so floor/expectation/ceiling are
+    # three readings of one number rather than three different questions.
+    result["projected_points_floor"] = result["ppg_p10"] * result["expected_games"]
+    result["projected_points_ceiling"] = result["ppg_p90"] * result["expected_games"]
+    # How much room there is above the expectation, which is the actual "might he boom" score — and
+    # not recoverable from projected_points, since two players can share it and not share this.
+    result["upside"] = result["projected_points_ceiling"] - result["projected_points"]
     result = result[[
         "player_id", "player_name", "position", "target_season",
-        "predicted_ppg_ppr", "expected_games", "season_games", "role_games",
+        "predicted_ppg_ppr", "ppg_p10", "ppg_p90", "expected_games", "season_games", "role_games",
         "projected_points", "projected_points_full",
+        "projected_points_floor", "projected_points_ceiling", "upside",
     ]]
 
     con = duckdb.connect(str(WAREHOUSE_PATH))
