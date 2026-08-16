@@ -14,6 +14,14 @@ the season being predicted doesn't exist yet, so this stays a strictly prior-yea
   `skill_position_grades` (it only grades WR/TE/RB); HistGradientBoostingRegressor takes the
   resulting NaN natively, no imputation needed.
 
+Plus a career block that is instead as of `target_season` itself — `seasons_of_experience`,
+`age_at_season`, `draft_round`, `draft_pick`. Age and years-in-league for the season being
+predicted are fixed and knowable before it starts, so using them isn't leakage the way a
+performance stat would be. Without these the model had no way to represent a player's place on
+the experience curve at all: its whole view of a high-scoring second-year player was last year's
+rate plus team context, so it could only regress them toward the mean of everyone who scored
+similarly, never toward what young ascending players specifically tend to do next.
+
 Label: actual PPG in `target_season`, only for players who played >= the same games-played floor
 `player_baselines.py` uses (imported, not redefined) — an actual season cut short by injury is as
 untrustworthy a training target as a short season is a baseline input.
@@ -48,6 +56,7 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 _BASE_FEATURES = [
     "weighted_ppg_ppr", "weighted_games_per_season", "seasons_used", "ol_grade", "skill_grade",
+    "seasons_of_experience", "age_at_season", "draft_pick",
 ]
 _FEATURE_COLUMNS = _BASE_FEATURES + [f"position_{p}" for p in _SKILL_POSITIONS]
 
@@ -111,12 +120,33 @@ SELECT
     pt.team,
     ol.ol_grade,
     sk.grade AS skill_grade,
+    -- Unlike every feature above, these are as of target_season itself rather than
+    -- target_season - 1. That isn't leakage: how old a player will be and how many years they'll
+    -- have been in the league are both fixed facts about the season being predicted, known before
+    -- a snap of it is played, which is exactly not true of performance or team-context stats.
+    -- 0 = rookie year, 1 = entering year two, and so on.
+    b.target_season - pl.rookie_season AS seasons_of_experience,
+    -- birth_date arrives as an ISO string, and TRY_CAST leaves an unparseable one as NULL rather
+    -- than failing the whole build over one bad row.
+    b.target_season - YEAR(TRY_CAST(pl.birth_date AS DATE)) AS age_at_season,
+    -- A static career fact, so no as-of question arises. NULL means undrafted, which is signal
+    -- rather than absence — HistGradientBoostingRegressor consumes the NaN natively, the same way
+    -- it already does for skill_grade on every QB row. Coverage is 56-81% across rookie eras with
+    -- no gradient, so a null doesn't stand in for "old season". draft_round is deliberately left
+    -- out: pick number already encodes it, and carrying both scored marginally worse in the
+    -- walk-forward backtest while adding no permutation importance.
+    pl.draft_pick,
     o.actual_ppg_ppr
 FROM player_weighted_baselines b
 LEFT JOIN player_team pt ON pt.player_id = b.player_id AND pt.season = b.target_season - 1
 LEFT JOIN offensive_line_grades ol ON ol.team = pt.team AND ol.season = b.target_season - 1
 LEFT JOIN skill_position_grades sk
     ON sk.team = pt.team AND sk.season = b.target_season - 1 AND sk.position = b.position
+-- players.years_of_experience is deliberately unused: it's one static value per player that
+-- doesn't equal seasons-since-rookie (Brady reads 23 against a 2000 rookie season and a final
+-- 2022 season), so applying it to a historical row would leak how the career eventually turned
+-- out. rookie_season and birth_date are immutable, so deriving from them is safe at any season.
+LEFT JOIN players pl ON pl.gsis_id = b.player_id
 LEFT JOIN actual_outcomes o ON o.player_id = b.player_id AND o.target_season = b.target_season
 -- Not cosmetic: DuckDB's parallel joins return these rows in a different order from run to run,
 -- and HistGradientBoostingRegressor sums gradients per histogram bin in row order. Float addition
