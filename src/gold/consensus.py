@@ -12,6 +12,11 @@ Two output tables, because team defenses need a different join key than individu
 - consensus_dst_projections: team defenses, joined on a normalized team abbreviation (see
   teams.py) instead, since `ids` is player-level and has no team-defense entries.
 
+Both tables carry each source's own number alongside the blend (`espn_points`, `sleeper_points`,
+`cbs_points`, `fftoday_points`, and `inhouse_points` on the player table), so a consensus row can
+be traced back to what each site actually said and a missing source reads as a NULL column rather
+than just a lower `num_sources`.
+
 inhouse_projections can lag behind the other four sources: its prior-year feature data comes from
 nflverse, which publishes noticeably slower than the external sites' own current-season
 projections, so its latest `target_season` isn't guaranteed to be the season the other four
@@ -31,14 +36,34 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 _SKILL_POSITIONS = ("QB", "RB", "WR", "TE", "K")
 
-_PERCENTILE_AGGREGATES = """
+# The sources unioned into each table's `source_projections` CTE, in blend order. Team defenses
+# have no in-house arm — inhouse_projections is player-level only.
+_SOURCES = ("espn", "sleeper", "cbs", "fftoday", "inhouse")
+_DST_SOURCES = ("espn", "sleeper", "cbs", "fftoday")
+
+
+def _aggregates(sources: tuple[str, ...]) -> str:
+    """Aggregate SELECT list for one consensus table: the blend, then each source on its own.
+
+    Both tables get their column list from here so the two can't drift apart — the per-source
+    columns are a pivot of the exact same `source_projections` rows the percentiles summarize,
+    not a second pass over the underlying tables. MAX() is just the pivot's pick-one aggregate:
+    every source contributes at most one row per key today (verified — non-null per-source columns
+    add up to `num_sources` on every row of both tables), so it never actually collapses anything.
+    """
+    per_source = ",\n".join(
+        f"    MAX(projected_points) FILTER (WHERE source = '{source}') AS {source}_points"
+        for source in sources
+    )
+    return f"""
     COUNT(*) AS num_sources,
     MIN(projected_points) AS min_points,
     MAX(projected_points) AS max_points,
     PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY projected_points) AS floor_p20,
     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY projected_points) AS median_p50,
     PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY projected_points) AS ceiling_p80,
-    STDDEV(projected_points) AS stddev_points
+    STDDEV(projected_points) AS stddev_points,
+{per_source}
 """
 
 # Every join also matches on position, since the `ids` crosswalk has a handful of duplicate
@@ -110,7 +135,7 @@ SELECT
     gsis_id,
     ANY_VALUE(player_name) AS player_name,
     ANY_VALUE(position) AS position,
-    {_PERCENTILE_AGGREGATES}
+    {_aggregates(_SOURCES)}
 FROM source_projections
 WHERE gsis_id IS NOT NULL
     AND projected_points IS NOT NULL
@@ -150,7 +175,7 @@ WITH source_projections AS (
 )
 SELECT
     team,
-    {_PERCENTILE_AGGREGATES}
+    {_aggregates(_DST_SOURCES)}
 FROM source_projections
 WHERE team IS NOT NULL AND projected_points IS NOT NULL
 GROUP BY team

@@ -76,6 +76,9 @@ network access of their own.
   actually represent (derived from their own data), not its own most-recent `target_season` —
   nflverse-fed `inhouse_projections` can lag the external sites' current-season projections, so a
   stale in-house number drops out of the blend instead of silently mixing with four current ones.
+  Alongside the blend, both tables expose each source's own number as its own column
+  (`espn_points`, `sleeper_points`, `cbs_points`, `fftoday_points`, plus `inhouse_points` on the
+  player table), so any consensus row can be traced back to what each site actually said.
   Pure SQL over already-loaded tables — no fetch step, no network.
 - `src/gold/adp_consensus.py` — builds `adp_consensus`: a consensus average draft position per
   player-season (QB/RB/WR/TE), blending `fantasypros_adp` and `ffc_adp` (FantasyFootballCalculator,
