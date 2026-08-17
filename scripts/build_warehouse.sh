@@ -37,3 +37,10 @@ python -m src.gold.points_over_replacement
 python -m src.gold.consensus
 python -m src.gold.boom_bust
 python -m src.gold.breakout_candidates
+
+# Fourth tier — draft_value prices points_over_replacement against adp_consensus using
+# inhouse_projections for its forward-looking half; player_archetypes then reads boom_bust for the
+# elite-finish history and outcome buckets and draft_value for the ADP-adjusted edge, so it has to
+# come last.
+python -m src.gold.draft_value
+python -m src.gold.player_archetypes
