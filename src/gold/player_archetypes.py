@@ -108,6 +108,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from src import console
 from src.gold.points_over_replacement import _SKILL_POSITIONS
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -339,6 +340,7 @@ def _add_walk_forward_edge(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@console.analysis
 def _print_rate_chart(outcomes: pd.DataFrame) -> None:
     """The source's own chart: what each archetype's seasons actually looked like."""
     chart = outcomes[outcomes["league_key"] == _SIGNIFICANCE_LEAGUE]
@@ -357,6 +359,7 @@ def _print_rate_chart(outcomes: pd.DataFrame) -> None:
             print(line)
 
 
+@console.analysis
 def _print_edge_table(outcomes: pd.DataFrame) -> None:
     """The same grid after the price adjustment — which archetypes are actually worth targeting."""
     edges = outcomes[outcomes["league_key"] == _SIGNIFICANCE_LEAGUE]
@@ -375,6 +378,7 @@ def _print_edge_table(outcomes: pd.DataFrame) -> None:
                   f"{f'{int(row.seasons_positive)}/{int(row.seasons_measured)}':>9}  {verdict}")
 
 
+@console.analysis
 def _print_walk_forward_report(df: pd.DataFrame) -> None:
     """Does the gated edge separate anything out of sample?
 
@@ -399,6 +403,7 @@ def _print_walk_forward_report(df: pd.DataFrame) -> None:
               f"elite finish {100 * group['is_elite_finish'].mean():>4.1f}%")
 
 
+@console.analysis
 def _print_live_board(df: pd.DataFrame, outcomes: pd.DataFrame) -> None:
     """The season being drafted, sorted by ADP — who each archetype actually is this year."""
     live_season = df["season"].max()
@@ -442,8 +447,9 @@ def build_player_archetypes() -> None:
     _print_walk_forward_report(df)
     _print_live_board(df, outcomes)
     if unclassified:
-        print(f"\n  ({unclassified} player-seasons had no birth date or rookie season and are "
-              f"left out rather than guessed into a cell.)")
+        # A data-quality signal rather than model analysis, so this stays visible in a full build.
+        console.note(f"{unclassified} player-seasons had no birth date or rookie season and are "
+                     f"left out rather than guessed into a cell")
 
     result = df[[
         "league_key", "season", "player_id", "player_name", "position", "archetype",
@@ -460,8 +466,8 @@ def build_player_archetypes() -> None:
     (outcome_count,) = con.execute("SELECT COUNT(*) FROM archetype_outcomes").fetchone()
     con.close()
 
-    print(f"\nBuilt {count} rows into {WAREHOUSE_PATH} (table: player_archetypes)")
-    print(f"Built {outcome_count} rows into {WAREHOUSE_PATH} (table: archetype_outcomes)")
+    console.table("player_archetypes", count)
+    console.table("archetype_outcomes", outcome_count)
 
 
 if __name__ == "__main__":

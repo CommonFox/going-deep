@@ -45,6 +45,8 @@ from pathlib import Path
 
 import duckdb
 
+from src import console
+
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 _SKILL_POSITIONS = ("QB", "RB", "WR", "TE")
@@ -295,7 +297,7 @@ def build_player_weighted_baselines() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM player_weighted_baselines").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: player_weighted_baselines)")
+    console.table("player_weighted_baselines", count)
 
 
 if __name__ == "__main__":

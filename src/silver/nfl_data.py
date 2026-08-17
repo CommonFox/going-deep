@@ -1,10 +1,14 @@
 """Fetch and load nflverse data (via nfl_data_py) into the DuckDB warehouse."""
 
+import contextlib
+import io
 from pathlib import Path
 
 import duckdb
 import nfl_data_py as nfl
 import pandas as pd
+
+from src import console
 
 RAW_DIR = Path("data/raw/nfl_data_py")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -21,7 +25,7 @@ def _save_raw(df, filename_stem: str) -> Path:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_DIR / f"{filename_stem}.parquet"
     df.to_parquet(raw_path)
-    print(f"Saved {len(df)} rows to {raw_path}")
+    console.archived(raw_path, len(df))
     return raw_path
 
 
@@ -34,9 +38,10 @@ def _load_parquet_to_table(raw_path: Path, table_name: str) -> None:
         f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM read_parquet(?)",
         [str(raw_path)],
     )
+    rows = con.execute(f"SELECT count(*) FROM {table_name}").fetchone()[0]
     con.close()
 
-    print(f"Loaded {raw_path} into {WAREHOUSE_PATH} (table: {table_name})")
+    console.table(table_name, rows)
 
 
 # nflverse retired the `player_stats` release in favour of `stats_player`, but nfl_data_py 0.3.3
@@ -191,7 +196,11 @@ def fetch_ftn_data(seasons: list[int]) -> Path:
     FTN data is only available from 2022 onward; earlier seasons are dropped.
     """
     seasons = [s for s in seasons if s >= 2022]
-    df = nfl.import_ftn_data(seasons)
+    # import_ftn_data ends with a bare `print('Downcasting floats.')`, which lands mid-build
+    # between two table lines. Swallowed at this one call rather than globally, so a genuine
+    # message from anywhere else still gets through.
+    with contextlib.redirect_stdout(io.StringIO()):
+        df = nfl.import_ftn_data(seasons)
     # Same cross-season dtype inconsistency as rosters' jersey_number/draft_number, this time
     # bool in some seasons' files and float in others.
     df["is_trick_play"] = df["is_trick_play"].astype(float)

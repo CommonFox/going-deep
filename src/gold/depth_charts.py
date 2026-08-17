@@ -30,6 +30,7 @@ from pathlib import Path
 
 import duckdb
 
+from src import console
 from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -139,7 +140,7 @@ def build_player_depth_chart() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM player_depth_chart").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: player_depth_chart)")
+    console.table("player_depth_chart", count)
 
 
 if __name__ == "__main__":

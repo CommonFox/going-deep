@@ -14,6 +14,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+from src import console
 from src.silver.teams import normalize_team
 
 RAW_DIR = Path("data/raw/cbs")
@@ -37,7 +38,7 @@ def fetch_season_projections(position: str, scoring: str, season: int) -> Path:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_DIR / f"proj_{position.lower()}_{scoring}_{season}.html"
     raw_path.write_text(response.text)
-    print(f"Saved {raw_path}")
+    console.archived(raw_path)
     return raw_path
 
 
@@ -115,7 +116,7 @@ def load_season_projections(fetched: list[tuple[str, str, int, Path]]) -> None:
     con.execute("CREATE OR REPLACE TABLE cbs_projections AS SELECT * FROM combined")
     con.close()
 
-    print(f"Loaded {len(combined)} rows into {WAREHOUSE_PATH} (table: cbs_projections)")
+    console.table("cbs_projections", len(combined))
 
 
 if __name__ == "__main__":

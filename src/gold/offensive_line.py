@@ -20,6 +20,7 @@ from pathlib import Path
 
 import duckdb
 
+from src import console
 from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -81,7 +82,7 @@ def build_offensive_line_grades() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM offensive_line_grades").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: offensive_line_grades)")
+    console.table("offensive_line_grades", count)
 
 
 if __name__ == "__main__":

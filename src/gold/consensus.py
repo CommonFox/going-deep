@@ -43,6 +43,7 @@ from pathlib import Path
 
 import duckdb
 
+from src import console
 from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -209,8 +210,8 @@ def build_consensus_projections() -> None:
     (dst_count,) = con.execute("SELECT COUNT(*) FROM consensus_dst_projections").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: consensus_projections)")
-    print(f"Built {dst_count} rows into {WAREHOUSE_PATH} (table: consensus_dst_projections)")
+    console.table("consensus_projections", count)
+    console.table("consensus_dst_projections", dst_count)
 
 
 if __name__ == "__main__":

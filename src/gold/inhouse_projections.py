@@ -122,6 +122,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, r2_score
 
+from src import console
 from src.gold.player_baselines import (
     _COMPONENT_COLUMNS,
     _MIN_GAMES_PLAYED,
@@ -796,6 +797,7 @@ def _walk_forward(
     return predictions, games_predictions, pd.DataFrame(metrics)
 
 
+@console.analysis
 def _print_no_baseline_report(
     metrics: pd.DataFrame, folds: list[pd.DataFrame], games_folds: list[pd.DataFrame]
 ) -> None:
@@ -837,6 +839,7 @@ def _games_metrics_no_baseline(games_fold: pd.DataFrame) -> dict:
     }
 
 
+@console.analysis
 def _print_backtest_report(
     metrics: pd.DataFrame, folds: list[pd.DataFrame], games_folds: list[pd.DataFrame]
 ) -> None:
@@ -871,6 +874,7 @@ def _print_backtest_report(
     _print_quantile_report(pooled, "veteran arm")
 
 
+@console.analysis
 def _print_quantile_report(pooled: pd.DataFrame, label: str) -> None:
     """Are the floor and ceiling the quantiles they claim to be?
 
@@ -888,6 +892,45 @@ def _print_quantile_report(pooled: pd.DataFrame, label: str) -> None:
           f"{100 * below_low:.1f}% of actual seasons under ppg_p10 (target "
           f"{100 * _QUANTILE_LOW:.0f}%), {100 * below_high:.1f}% under ppg_p90 (target "
           f"{100 * _QUANTILE_HIGH:.0f}%); {inverted} crossed intervals")
+
+
+@console.analysis
+def _print_unproven_cohort(
+    live_unproven: pd.DataFrame, unproven_labeled: pd.DataFrame, live_season: int
+) -> None:
+    """How many players the rookie/unproven arm covered, and what it learned from."""
+    print(f"\nUnproven arm: {len(live_unproven)} players with no qualifying prior season "
+          f"projected for {live_season}, trained on {len(unproven_labeled)} labelled seasons.")
+
+
+@console.analysis
+def _print_importance_report(
+    labeled: pd.DataFrame, output_frames: list[pd.DataFrame], fold_seasons: list[int]
+) -> None:
+    """Which features is the model actually leaning on?
+
+    Out-of-sample (on the fold, not its training slice) so a feature the model overfit to doesn't
+    look important just because it memorized training noise. Answers "do the team-context signals
+    (ol_grade/skill_grade) actually carry weight" rather than assuming they do because they're in
+    the feature list. Run on the last fold: it has the most training data behind it, so it's the
+    fold closest to the live model actually shipped.
+
+    Refitting that fold and permuting every feature 20 times costs real time, and nothing
+    downstream reads the result — so in a full build the decorator skips the computation, not just
+    the printing.
+    """
+    last_fold = output_frames[-1]
+    last_model = _fit(labeled[labeled["target_season"] < fold_seasons[-1]])
+    importances = permutation_importance(
+        last_model, last_fold[_FEATURE_COLUMNS], last_fold["actual_ppg_ppr"],
+        n_repeats=20, random_state=0,
+    )
+    ranked_importances = sorted(
+        zip(_FEATURE_COLUMNS, importances.importances_mean), key=lambda x: -x[1]
+    )
+    importance_str = ", ".join(f"{name}={score:.3f}" for name, score in ranked_importances)
+    print(f"\nPermutation feature importance on the {fold_seasons[-1]} fold "
+          f"(mean R2 drop when shuffled): {importance_str}")
 
 
 def build_inhouse_projections() -> None:
@@ -920,26 +963,9 @@ def build_inhouse_projections() -> None:
             labeled, labeled_games, fold_seasons
         )
         _print_backtest_report(metrics, output_frames, games_frames)
-
-        # Out-of-sample (on the fold, not its training slice) so a feature the model overfit to
-        # doesn't look important just because it memorized training noise. Answers "do the
-        # team-context signals (ol_grade/skill_grade) actually carry weight" rather than assuming
-        # they do because they're in the feature list. Run on the last fold: it has the most
-        # training data behind it, so it's the fold closest to the live model actually shipped.
-        last_fold = output_frames[-1]
-        last_model = _fit(labeled[labeled["target_season"] < fold_seasons[-1]])
-        importances = permutation_importance(
-            last_model, last_fold[_FEATURE_COLUMNS], last_fold["actual_ppg_ppr"],
-            n_repeats=20, random_state=0,
-        )
-        ranked_importances = sorted(
-            zip(_FEATURE_COLUMNS, importances.importances_mean), key=lambda x: -x[1]
-        )
-        importance_str = ", ".join(f"{name}={score:.3f}" for name, score in ranked_importances)
-        print(f"\nPermutation feature importance on the {fold_seasons[-1]} fold "
-              f"(mean R2 drop when shuffled): {importance_str}")
+        _print_importance_report(labeled, output_frames, fold_seasons)
     else:
-        print("No labeled season has a trainable prior slice yet — skipping the backtest.")
+        console.note("no labeled season has a trainable prior slice yet — skipping the backtest")
 
     # Restrict live output to players with some evidence they're actually in the league: either
     # they're on the target season's week 1 depth chart, or they played the season before. Without
@@ -965,7 +991,7 @@ def build_inhouse_projections() -> None:
         live["expected_games"] = float("nan")
         live["ppg_p10"] = float("nan")
         live["ppg_p90"] = float("nan")
-        print("No labeled seasons available yet — live cohort predictions left null.")
+        console.note("no labeled seasons available yet — live cohort predictions left null")
     output_frames.append(live)
 
     # The rookie arm, backtested and predicted the same way, then concatenated into the same table.
@@ -995,8 +1021,7 @@ def build_inhouse_projections() -> None:
             live_unproven, unproven_labeled, _NO_BASELINE_FEATURE_COLUMNS
         )
         output_frames.append(live_unproven)
-        print(f"\nUnproven arm: {len(live_unproven)} players with no qualifying prior season "
-              f"projected for {live_season}, trained on {len(unproven_labeled)} labelled seasons.")
+        _print_unproven_cohort(live_unproven, unproven_labeled, live_season)
 
     result = pd.concat(output_frames, ignore_index=True)
     result["season_games"] = result["target_season"].map(season_games)
@@ -1024,8 +1049,8 @@ def build_inhouse_projections() -> None:
     (metric_count,) = con.execute("SELECT COUNT(*) FROM inhouse_backtest").fetchone()
     con.close()
 
-    print(f"\nBuilt {count} rows into {WAREHOUSE_PATH} (table: inhouse_projections)")
-    print(f"Built {metric_count} rows into {WAREHOUSE_PATH} (table: inhouse_backtest)")
+    console.table("inhouse_projections", count)
+    console.table("inhouse_backtest", metric_count)
 
 
 if __name__ == "__main__":

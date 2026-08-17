@@ -22,6 +22,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from src import console
+
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 # ESPN's numeric stat IDs -> our normalized scoring column names.
@@ -158,7 +160,7 @@ def build_league_settings() -> None:
     con.execute("CREATE OR REPLACE TABLE league_settings AS SELECT * FROM df")
     con.close()
 
-    print(f"Built {len(df)} rows into {WAREHOUSE_PATH} (table: league_settings)")
+    console.table("league_settings", len(df))
 
 
 if __name__ == "__main__":

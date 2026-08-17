@@ -23,6 +23,7 @@ from pathlib import Path
 
 import duckdb
 
+from src import console
 from src.silver.players import merge_name
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -84,7 +85,7 @@ def build_adp_consensus() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM adp_consensus").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: adp_consensus)")
+    console.table("adp_consensus", count)
 
 
 if __name__ == "__main__":

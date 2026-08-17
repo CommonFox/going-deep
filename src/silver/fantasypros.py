@@ -14,6 +14,8 @@ import duckdb
 import pandas as pd
 import requests
 
+from src import console
+
 RAW_DIR = Path("data/raw/fantasypros")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 BASE_URL = "https://www.fantasypros.com/nfl/rankings"
@@ -46,7 +48,7 @@ def _save_raw_json(players: list[dict], filename_stem: str) -> Path:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_DIR / f"{filename_stem}.json"
     raw_path.write_text(json.dumps(players))
-    print(f"Saved {len(players)} rows to {raw_path}")
+    console.archived(raw_path, len(players))
     return raw_path
 
 
@@ -60,7 +62,7 @@ def _load_json_to_table(raw_path: Path, table_name: str) -> None:
     con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {raw_path} into {WAREHOUSE_PATH} (table: {table_name})")
+    console.table(table_name, len(df))
 
 
 def fetch_draft_rankings(scoring: str) -> Path:
@@ -132,7 +134,7 @@ def load_adp_manual(raw_dir: Path = RAW_DIR) -> None:
     con.execute("CREATE OR REPLACE TABLE fantasypros_adp AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {len(df)} rows from {len(frames)} files into {WAREHOUSE_PATH} (table: fantasypros_adp)")
+    console.table("fantasypros_adp", len(df), f"from {len(frames)} files")
 
 
 if __name__ == "__main__":

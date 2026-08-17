@@ -27,6 +27,8 @@ from pathlib import Path
 
 import duckdb
 
+from src import console
+
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 _BUILD_SQL = """
@@ -66,7 +68,7 @@ def build_breakout_candidates() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM breakout_candidates").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: breakout_candidates)")
+    console.table("breakout_candidates", count)
 
 
 if __name__ == "__main__":
