@@ -211,6 +211,60 @@ def load_ftn_data(raw_path: Path) -> None:
     _load_parquet_to_table(raw_path, "ftn_data")
 
 
+# Play-by-play, restricted to punt plays. nfl_data_py's import_pbp_data 404s on recent seasons for
+# the same reason import_weekly_data does (see _STATS_PLAYER_URL), so the release parquet is read
+# directly.
+_PBP_URL = (
+    "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_{season}.parquet"
+)
+
+# The punt-play columns worth archiving. Everything needed to reconstruct a punter's scoring line
+# under any league's rules, plus the context that plausibly explains it: where the punt started
+# (`yardline_100`, which caps how far a punter can kick before the touchback risk dominates), and
+# the weather and roof a punt was struck in.
+_PUNT_COLUMNS = [
+    "game_id", "season", "week", "season_type", "posteam", "defteam",
+    "punter_player_id", "punter_player_name",
+    "yardline_100", "kick_distance", "return_yards", "touchback",
+    "punt_inside_twenty", "punt_in_endzone", "punt_out_of_bounds", "punt_downed",
+    "punt_fair_catch", "punt_blocked",
+    "punt_returner_player_id", "punt_returner_player_name",
+    "roof", "surface", "temp", "wind",
+]
+
+
+def fetch_pbp_punts(seasons: list[int]) -> Path:
+    """Fetch every punt play for the given seasons and save raw to parquet.
+
+    Play-by-play is the only nflverse feed carrying where a punt actually came to rest, which is
+    what `punts inside the 10` — a scoring category in the ESPN league and in no per-player feed —
+    has to be derived from. A full pbp archive is ~370 columns over ~50k plays a season; punts are
+    ~2k of those plays, so the rows are filtered and the columns pruned at fetch time rather than
+    archiving two orders of magnitude more data than any punt model will ever read. DuckDB pushes
+    both down into ranged reads against the remote parquet, so only the relevant column chunks come
+    over the wire.
+    """
+    con = duckdb.connect()
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    columns = ", ".join(_PUNT_COLUMNS)
+    df = pd.concat(
+        [
+            con.sql(
+                f"SELECT {columns} FROM read_parquet('{_PBP_URL.format(season=season)}') "
+                "WHERE play_type = 'punt'"
+            ).df()
+            for season in sorted(seasons)
+        ],
+        ignore_index=True,
+    )
+    con.close()
+    return _save_raw(df, f"pbp_punts_{_seasons_label(seasons)}")
+
+
+def load_pbp_punts(raw_path: Path) -> None:
+    _load_parquet_to_table(raw_path, "pbp_punts")
+
+
 def fetch_pfr_advstats(stat_type: str, seasons: list[int]) -> Path:
     """Fetch PFR advanced season-level stats (pass/rush/rec/def) and save raw to parquet.
 
@@ -272,6 +326,7 @@ if __name__ == "__main__":
     load_players(fetch_players())
     load_ngs_data(fetch_ngs_data(played_seasons))
     load_ftn_data(fetch_ftn_data(played_seasons))
+    load_pbp_punts(fetch_pbp_punts(played_seasons))
 
     for stat_type in ["pass", "rush", "rec"]:
         load_pfr_advstats(fetch_pfr_advstats(stat_type, played_seasons), stat_type)

@@ -42,6 +42,26 @@ _ESPN_STAT_IDS = {
     "fum_lost_pts": 72,
 }
 
+# Punting, kept separate from the block above only because it reads as its own scoring system: the
+# ESPN league starts a punter (slot 18), which no other league here does and no external projection
+# source prices. `punt_avg44/42/40` are per-*game* bonuses — ESPN awards them once for each game a
+# punter finishes in that gross-average band, not once for the season — so anything scoring these
+# has to do it week by week and sum, not score a season total. Inside-the-10 punts also count for
+# inside-the-20, so a punt downed at the 6 is worth in10 + in20, not in10 alone (verified against
+# ESPN's own applied totals in src/gold/punters.py).
+_ESPN_PUNT_STAT_IDS = {
+    "punt_pts": 138,
+    "punt_in10_pts": 140,
+    "punt_in20_pts": 141,
+    "punt_blocked_pts": 142,
+    "punt_returned_pts": 143,
+    "punt_touchback_pts": 145,
+    "punt_fair_catch_pts": 146,
+    "punt_avg44_pts": 148,
+    "punt_avg42_pts": 149,
+    "punt_avg40_pts": 150,
+}
+
 # ESPN's numeric lineup slot IDs -> our normalized roster slot columns. Slot 7 ("OP") is ESPN's
 # superflex slot (QB eligible); slot 23 ("RB/WR/TE") is the standard non-QB flex.
 _ESPN_SLOT_IDS = {
@@ -52,6 +72,7 @@ _ESPN_SLOT_IDS = {
     "flex_slots": "23",
     "superflex_slots": "7",
     "k_slots": "17",
+    "p_slots": "18",
     "dst_slots": "16",
     "bench_slots": "20",
     "ir_slots": "21",
@@ -62,8 +83,9 @@ _COLUMNS = [
     "rec_pts", "pass_yd_pts", "pass_td_pts", "pass_2pt_pts", "pass_int_pts",
     "rush_yd_pts", "rush_td_pts", "rush_2pt_pts",
     "rec_yd_pts", "rec_td_pts", "rec_2pt_pts", "fum_lost_pts",
+    *_ESPN_PUNT_STAT_IDS,
     "qb_slots", "rb_slots", "wr_slots", "te_slots", "flex_slots", "superflex_slots",
-    "k_slots", "dst_slots", "bench_slots", "ir_slots",
+    "k_slots", "p_slots", "dst_slots", "bench_slots", "ir_slots",
 ]
 
 
@@ -108,6 +130,9 @@ def _sleeper_settings(con: duckdb.DuckDBPyConnection) -> dict:
         "rec_td_pts": row["rec_td_pts"],
         "rec_2pt_pts": row["rec_2pt_pts"],
         "fum_lost_pts": row["fum_lost_pts"],
+        # Sleeper has no punting scoring settings at all — the platform doesn't offer the position
+        # — so these are zero rather than absent, keeping both rows the same shape.
+        **{column: 0.0 for column in _ESPN_PUNT_STAT_IDS},
         "qb_slots": slots.get("QB", 0),
         "rb_slots": slots.get("RB", 0),
         "wr_slots": slots.get("WR", 0),
@@ -115,6 +140,7 @@ def _sleeper_settings(con: duckdb.DuckDBPyConnection) -> dict:
         "flex_slots": slots.get("FLEX", 0),
         "superflex_slots": slots.get("SUPER_FLEX", 0),
         "k_slots": slots.get("K", 0),
+        "p_slots": slots.get("P", 0),
         "dst_slots": slots.get("DEF", 0),
         "bench_slots": slots.get("BN", 0),
         "ir_slots": slots.get("IR", 0),
@@ -147,7 +173,7 @@ def _espn_settings(con: duckdb.DuckDBPyConnection) -> dict:
         "season": int(row["season"]),
         "team_count": int(row["team_count"]),
     }
-    for column, stat_id in _ESPN_STAT_IDS.items():
+    for column, stat_id in {**_ESPN_STAT_IDS, **_ESPN_PUNT_STAT_IDS}.items():
         settings[column] = points_by_stat_id.get(stat_id, 0.0)
     for column, slot_id in _ESPN_SLOT_IDS.items():
         settings[column] = int(row[f"slot_{slot_id}"])
