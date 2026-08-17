@@ -70,6 +70,9 @@ run src.gold.punt_environment
 run src.gold.consensus
 run src.gold.boom_bust
 run src.gold.breakout_candidates
+# draft_strategy simulates drafts off adp_consensus and scores them with points_over_replacement,
+# so it needs nothing from the fourth tier — it prices a roster plan, not a player.
+run src.gold.draft_strategy
 
 # Fourth tier — draft_value prices points_over_replacement against adp_consensus using
 # inhouse_projections for its forward-looking half; player_archetypes then reads boom_bust for the

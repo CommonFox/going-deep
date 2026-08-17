@@ -317,6 +317,46 @@ network access of their own.
   games-played check the way `boom_bust` has, since both describe an *actual* outcome that, for the
   live target season, hasn't happened yet — `predicted_delta` is left as a continuous score to
   sort/filter directly. Pure SQL over already-loaded tables — no fetch step, no network.
+- `src/gold/draft_strategy.py` — builds `draft_strategy_results` and `draft_strategy_summary`: the
+  one model here that prices a *plan* rather than a player. "Three running backs and two receivers in
+  the first five rounds" is a claim about roster construction, not about any individual, and the only
+  way to settle it is to run the draft — so this runs ~81,000 of them. Each is a snake draft off that
+  season's real `adp_consensus` board, `team_count` teams over `skill starters + bench` rounds, with
+  every team scored on the hindsight-best starting lineup it could field from the roster it finished
+  with, in that league's own scoring. A drafted player who never played is carried as a genuine zero,
+  on the same reasoning as `draft_value`: the expected return on a plan has to include its bust rate.
+
+  A strategy constrains only the first five picks and is expressed as a **composition** — how many of
+  each position, with ADP resolving the order, since nobody committed to "3 RB" passes the best
+  receiver on the board to force a back. That keeps the space at 36 rather than 4^5, and ordering is
+  then asked separately as its own `ordering` strategies (every permutation of 3RB+2WR and 2RB+3WR).
+  `points_vs_field` is measured against the other teams in the *same* draft, so the do-nothing ADP
+  control sits at exactly zero by construction — which is also the build's own correctness check.
+
+  The measured answer is mostly a negative one, and deliberately reported that way. The scarcity
+  premise behind the "full house" opening is real but shallow: an elite back outscores an elite
+  receiver at the same positional finish, and that edge is gone by about RB15 in the 12-team half-PPR
+  league and by RB5 in the 10-team full-PPR one. Three backs in five rounds therefore spends a
+  premium pick in rounds 3-5, exactly where backs return least and hit least often, and it ranks
+  mid-table in one league and near the bottom in the other. But **no position's slope clears
+  significance** under either league's actual settings, tested season-clustered (the eleven
+  per-season means, not the ~1,500 individual drafts, since one torn ACL moves every RB-heavy draft
+  that year together). What the sweep can identify reliably is which openings *lose* — the all-in
+  ones — plus one balanced opening, `2RB2WR1TE`, that clears |t| > 2 in both leagues independently.
+
+  Two robustness dimensions are stored alongside rather than collapsed. `field_model = 'mixed'` gives
+  every opponent its own seeded random opening instead of pure ADP: rankings are stable (Spearman
+  0.77-0.96) but levels move, and disciplined best-available-by-ADP goes from a break-even control to
+  the top of the board in the 12-team league — when everyone else reaches to fill a quota, the
+  drafter without one collects what they leave. `variant = 'superflex'` converts a bench spot into a
+  superflex slot (roster size unchanged) purely as a counterfactual, since **neither league is
+  superflex** — verified against the platforms' raw settings, not inferred. There the quarterback
+  slope becomes the largest and most significant effect anywhere in this warehouse, which is the
+  answer to "should I take quarterbacks earlier": not in these leagues, and emphatically yes in one
+  that adds the slot. That figure is an upper bound and the docstring says why — the ADP board being
+  drafted from is still a 1QB board, so the focal team buys quarterbacks at prices real superflex
+  drafts have already corrected. Pure SQL/Python over already-loaded tables — no fetch step, no
+  network. Read alongside `notebooks/draft_strategy.ipynb`, which is where the findings are written up.
 - `src/gold/player_archetypes.py` — builds `player_archetypes` and `archetype_outcomes`: sorts every
   drafted player-season into a career-stage archetype, then measures what each archetype is actually
   worth. The taxonomy crosses "has he ever finished elite" (`prior_elite_finishes`, counted strictly
@@ -381,7 +421,9 @@ python -c "import duckdb; print(duckdb.connect('data/warehouse.duckdb').sql('SHO
 ## Notebooks (`notebooks/`)
 
 Findings worth keeping, written as live queries so re-running updates them instead of leaving them
-stale — see `notebooks/README.md`. `src/query.py` is the read-only accessor they use:
+stale — see `notebooks/README.md`. Currently `punting.ipynb` (the position no external source
+prices) and `draft_strategy.ipynb` (what roster construction is actually worth in each league).
+`src/query.py` is the read-only accessor they use:
 
 ```python
 from src.query import q, tables, columns, peek
