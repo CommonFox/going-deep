@@ -1,0 +1,15 @@
+# Optional — only needed to run notebooks/, not to build the warehouse.
+#
+#     source .venv/bin/activate
+#     pip install -r requirements-notebooks.txt
+#
+# Deliberately not folded into requirements.txt: the pipeline has no notebook dependency, and
+# these two pull in ~40 transitive packages between them. Kept as direct asks rather than a full
+# freeze for the same reason — pinning Jupyter's whole tree is churn nobody will maintain, and
+# nothing here touches the warehouse's correctness.
+#
+# ipykernel  — the kernel VS Code (or JupyterLab) runs notebook cells against.
+# nbconvert  — headless execution, which is what scripts/run_notebooks.sh uses to refresh
+#              every notebook's outputs after a rebuild.
+ipykernel==7.3.0
+nbconvert==7.17.1

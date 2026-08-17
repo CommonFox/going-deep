@@ -354,6 +354,7 @@ A Python 3.11 virtualenv lives at `.venv/` (gitignored):
 ```bash
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -r requirements-notebooks.txt   # optional, only for notebooks/
 ```
 
 ## Usage
@@ -375,4 +376,24 @@ Query the warehouse with the DuckDB CLI or Python:
 
 ```bash
 python -c "import duckdb; print(duckdb.connect('data/warehouse.duckdb').sql('SHOW TABLES'))"
+```
+
+## Notebooks (`notebooks/`)
+
+Findings worth keeping, written as live queries so re-running updates them instead of leaving them
+stale — see `notebooks/README.md`. `src/query.py` is the read-only accessor they use:
+
+```python
+from src.query import q, tables, columns, peek
+
+q("SELECT * FROM punter_projections ORDER BY projected_points DESC LIMIT 10")
+```
+
+It opens a connection per call and closes it, on purpose. DuckDB takes a file lock on the
+warehouse — one writer or many readers — and a long-lived notebook kernel holding one will make
+`build_warehouse.sh` fail with `Could not set lock on file` with nothing pointing at the notebook
+as the cause.
+
+```bash
+./scripts/run_notebooks.sh          # re-execute every notebook against the current warehouse
 ```
