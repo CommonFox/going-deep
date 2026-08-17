@@ -63,6 +63,7 @@ run src.gold.league_settings
 run src.gold.inhouse_projections
 run src.gold.points_over_replacement
 run src.gold.punters
+run src.gold.punt_environment
 
 # Third tier — consensus blends every external source plus inhouse_projections; boom_bust and
 # breakout_candidates each read a second-tier table alongside adp_consensus.

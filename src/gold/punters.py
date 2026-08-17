@@ -137,7 +137,7 @@ _TEAM_K_GRID = [2, 4, 8, 16, 32, 64, 128]
 _INCUMBENT, _NEW_TEAM, _UNPROVEN = "incumbent", "new_team", "unproven"
 
 
-def _scoring(con: duckdb.DuckDBPyConnection) -> pd.Series:
+def league_scoring(con: duckdb.DuckDBPyConnection) -> pd.Series:
     return con.sql(
         f"SELECT * FROM league_settings WHERE league_key = '{_LEAGUE_KEY}'"
     ).df().iloc[0]
@@ -637,7 +637,7 @@ def _print_projection_report(projections: pd.DataFrame, target: int) -> None:
 
 def build_punters() -> None:
     con = duckdb.connect(str(WAREHOUSE_PATH))
-    scoring = _scoring(con)
+    scoring = league_scoring(con)
 
     con.execute(
         f"CREATE OR REPLACE TABLE punter_seasons AS "

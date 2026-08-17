@@ -252,6 +252,19 @@ network access of their own.
   every naive baseline on MAE, RMSE and rank correlation — and still can't reliably pick the top
   five, because who keeps the job in November is the dominant term and nothing predicts it. Pure
   SQL/Python over already-loaded tables — no fetch step, no network.
+- `src/gold/punt_environment.py` — builds `punt_environment`: one row per team-season describing
+  the punting situation a team creates, on offense (how often it punts, from where, and what those
+  punts are worth) and on defense (punts forced and punter points allowed — the matchup side).
+  Exists because the intuition behind `punters.py`'s volume model is only half right. A punt struck
+  from the opponent's side of the field is worth 3.73 league points; one from inside a team's own
+  10 is worth 0.39 — less than the flat point a punt pays, because two-thirds get returned. So
+  teams that punt most punt from deeper and lose ~11% of their value per punt, and volume still
+  wins comfortably (5.60 punt points a game in the fewest-punting quintile against 8.72 in the
+  most). The table is **diagnostic, not predictive**, and the docstring says why: average punt spot
+  explains a team's points per punt at r=0.61 within a season but predicts next season's punter
+  scoring at r=0.02, matchup-aware weekly rankings score no better out of sample than team punt
+  rate alone, and weather doesn't order at all. Pure SQL/Python over already-loaded tables — no
+  fetch step, no network.
 - `src/gold/boom_bust.py` — builds `boom_bust`: classifies each skill-position player-season into
   an outcome bucket (League Winner/Delivered/Beat His Price/Met His Price/Fine/Busted/Got Injured/
   Never Had The Job/No Preseason ADP), measured on an **absolute** scale rather than a relative
