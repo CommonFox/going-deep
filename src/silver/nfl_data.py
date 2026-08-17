@@ -2,6 +2,8 @@
 
 import contextlib
 import io
+import time
+import urllib.error
 from pathlib import Path
 
 import duckdb
@@ -281,8 +283,24 @@ def load_pfr_advstats(raw_path: Path, stat_type: str) -> None:
 
 
 def fetch_ids() -> Path:
-    """Fetch the cross-platform player ID crosswalk and save raw to parquet."""
-    df = nfl.import_ids()
+    """Fetch the cross-platform player ID crosswalk and save raw to parquet.
+
+    import_ids() reads straight from raw.githubusercontent.com with no retry of its own, and that
+    endpoint 429s under light, unpredictable load unrelated to us — so retry with backoff here
+    rather than failing the whole build over a transient rate limit.
+    """
+    max_attempts = 4
+    for attempt in range(max_attempts):
+        try:
+            df = nfl.import_ids()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt == max_attempts - 1:
+                raise
+            delay = 30 * (2**attempt)
+            console.note(f"import_ids hit HTTP 429, retrying in {delay}s "
+                         f"(attempt {attempt + 1}/{max_attempts})")
+            time.sleep(delay)
     return _save_raw(df, "ids")
 
 

@@ -128,6 +128,10 @@ def load_adp_manual(raw_dir: Path = RAW_DIR) -> None:
             "adp": df["AVG"],
         }))
 
+    if not frames:
+        console.note("no FantasyPros_*_Overall_ADP_Rankings.csv files found — skipping fantasypros_adp")
+        return
+
     df = pd.concat(frames, ignore_index=True)
     WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(WAREHOUSE_PATH))
@@ -145,3 +149,5 @@ if __name__ == "__main__":
 
     for position in WEEKLY_POSITIONS:
         load_weekly_rankings(fetch_weekly_rankings(position, current_week), position)
+
+    load_adp_manual()
