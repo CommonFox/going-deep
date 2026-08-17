@@ -261,8 +261,8 @@ if __name__ == "__main__":
     load_depth_chart_snapshots(fetch_depth_chart_snapshots(forward_looking_seasons))
     load_ids(fetch_ids())
     load_players(fetch_players())
-    load_ngs_data(fetch_ngs_data(seasons))
-    load_ftn_data(fetch_ftn_data(seasons))
+    load_ngs_data(fetch_ngs_data(played_seasons))
+    load_ftn_data(fetch_ftn_data(played_seasons))
 
     for stat_type in ["pass", "rush"]:
-        load_pfr_advstats(fetch_pfr_advstats(stat_type, seasons), stat_type)
+        load_pfr_advstats(fetch_pfr_advstats(stat_type, played_seasons), stat_type)
