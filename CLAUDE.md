@@ -34,6 +34,18 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
     tables (e.g. `consensus.py`). Pure SQL/Python over the warehouse — no fetch step, no network.
 - `if __name__ == "__main__":` in each source module runs the full fetch→load sequence for that
   source end to end.
+- Console output goes through `src/console.py`, never a bare `print`:
+  - `console.table(name, rows)` after writing a warehouse table — one line, always shown. This is
+    the progress a build is read for.
+  - `console.archived(path, rows)` after writing a raw file, and `console.note(msg)` for anything
+    unusual (a skipped fetch, a source that returned nothing).
+  - `@console.analysis` on any `_print_*`/`_report` helper that exists only to print a model
+    report. `scripts/build_warehouse.sh` sets `GOING_DEEP_QUIET`, which no-ops those functions so a
+    full build stays scannable; running the module directly still prints everything, and so does
+    `build_warehouse.sh --verbose`. Put expensive report-only computation *inside* the decorated
+    function so a quiet build skips the work, not just the printing.
+- `python -m src.summary` lists every warehouse table and its row count; `--brief` gives the
+  per-layer roll-up the build script ends with.
 - One feature per branch, with frequent commits pushed to `origin` so work can resume from a
   different machine. Use conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, etc.) for
   commit subjects.
