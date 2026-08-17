@@ -264,5 +264,5 @@ if __name__ == "__main__":
     load_ngs_data(fetch_ngs_data(played_seasons))
     load_ftn_data(fetch_ftn_data(played_seasons))
 
-    for stat_type in ["pass", "rush"]:
+    for stat_type in ["pass", "rush", "rec"]:
         load_pfr_advstats(fetch_pfr_advstats(stat_type, played_seasons), stat_type)
