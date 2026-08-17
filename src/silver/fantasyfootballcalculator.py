@@ -23,6 +23,8 @@ import duckdb
 import pandas as pd
 import requests
 
+from src import console
+
 RAW_DIR = Path("data/raw/fantasyfootballcalculator")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 BASE_URL = "https://fantasyfootballcalculator.com/api/v1"
@@ -49,7 +51,7 @@ def fetch_adp(scoring_format: str, season: int) -> Path:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_DIR / f"adp_{scoring_format}_{season}.json"
     raw_path.write_text(json.dumps(response.json()))
-    print(f"Saved {raw_path}")
+    console.archived(raw_path)
     return raw_path
 
 
@@ -73,7 +75,9 @@ def load_adp_all() -> None:
             rows.append({**player, "scoring_format": scoring_format, "season": int(season)})
 
     if skipped:
-        print(f"Skipped {len(skipped)} file(s) with no ADP data: {', '.join(skipped)}")
+        console.note(
+            f"skipped {len(skipped)} file(s) with no ADP data: {', '.join(skipped)}"
+        )
 
     df = pd.DataFrame(rows)
     WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +85,7 @@ def load_adp_all() -> None:
     con.execute("CREATE OR REPLACE TABLE ffc_adp AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {len(df)} rows from {len(raw_paths)} files into {WAREHOUSE_PATH} (table: ffc_adp)")
+    console.table("ffc_adp", len(df), f"from {len(raw_paths)} files")
 
 
 if __name__ == "__main__":

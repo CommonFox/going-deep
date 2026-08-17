@@ -8,6 +8,8 @@ import duckdb
 import pandas as pd
 import requests
 
+from src import console
+
 RAW_DIR = Path("data/raw/sleeper")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 BASE_URL = "https://api.sleeper.app/v1"
@@ -32,7 +34,7 @@ def _save_raw_json(data, filename_stem: str) -> Path:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_DIR / f"{filename_stem}.json"
     raw_path.write_text(json.dumps(data))
-    print(f"Saved {raw_path}")
+    console.archived(raw_path)
     return raw_path
 
 
@@ -45,11 +47,14 @@ def _load_json_to_table(raw_path: Path, table_name: str) -> None:
     con = duckdb.connect(str(WAREHOUSE_PATH))
     if df.empty and len(df.columns) == 0:
         con.execute(f"DROP TABLE IF EXISTS {table_name}")
-    else:
-        con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
+        con.close()
+        console.note(f"{table_name}: source returned no rows — table dropped")
+        return
+
+    con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {raw_path} into {WAREHOUSE_PATH} (table: {table_name})")
+    console.table(table_name, len(df))
 
 
 def fetch_league(league_id: str) -> Path:
@@ -136,7 +141,9 @@ def fetch_players(sport: str = "nfl") -> Path:
     if raw_path.exists():
         age_seconds = time.time() - raw_path.stat().st_mtime
         if age_seconds < PLAYERS_MAX_AGE_SECONDS:
-            print(f"Skipped fetch: {raw_path} is {age_seconds / 3600:.1f}h old (< 24h)")
+            console.note(
+                f"skipped fetch: {raw_path.name} is {age_seconds / 3600:.1f}h old (< 24h)"
+            )
             return raw_path
 
     data = _get(f"/players/{sport}")
@@ -152,7 +159,7 @@ def load_players(raw_path: Path) -> None:
     con.execute("CREATE OR REPLACE TABLE sleeper_players AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {raw_path} into {WAREHOUSE_PATH} (table: sleeper_players)")
+    console.table("sleeper_players", len(df))
 
 
 def fetch_projections(season: int, weeks: list[int]) -> Path:
@@ -198,7 +205,7 @@ def load_projections(raw_path: Path) -> None:
     con.execute("CREATE OR REPLACE TABLE sleeper_projections AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {len(df)} rows into {WAREHOUSE_PATH} (table: sleeper_projections)")
+    console.table("sleeper_projections", len(df))
 
 
 if __name__ == "__main__":

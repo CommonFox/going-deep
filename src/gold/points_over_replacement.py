@@ -29,6 +29,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from src import console
+
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 _SKILL_POSITIONS = ("QB", "RB", "WR", "TE")
@@ -148,7 +150,7 @@ def build_points_over_replacement() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM points_over_replacement").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: points_over_replacement)")
+    console.table("points_over_replacement", count)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
+from src import console
 from src.silver.teams import normalize_team
 
 load_dotenv()
@@ -46,7 +47,7 @@ def _save_raw_json(data, filename_stem: str) -> Path:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     raw_path = RAW_DIR / f"{filename_stem}.json"
     raw_path.write_text(json.dumps(data))
-    print(f"Saved {raw_path}")
+    console.archived(raw_path)
     return raw_path
 
 
@@ -59,11 +60,14 @@ def _load_json_to_table(raw_path: Path, table_name: str) -> None:
     con = duckdb.connect(str(WAREHOUSE_PATH))
     if df.empty and len(df.columns) == 0:
         con.execute(f"DROP TABLE IF EXISTS {table_name}")
-    else:
-        con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
+        con.close()
+        console.note(f"{table_name}: source returned no rows — table dropped")
+        return
+
+    con.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {raw_path} into {WAREHOUSE_PATH} (table: {table_name})")
+    console.table(table_name, len(df))
 
 
 def _league_url(league_id: str, season: int) -> str:
@@ -188,7 +192,7 @@ def load_projections(raw_path: Path, season: int) -> None:
     con.execute("CREATE OR REPLACE TABLE espn_projections AS SELECT * FROM df")
     con.close()
 
-    print(f"Loaded {len(df)} rows into {WAREHOUSE_PATH} (table: espn_projections)")
+    console.table("espn_projections", len(df))
 
 
 def fetch_transactions(league_id: str, season: int) -> Path:

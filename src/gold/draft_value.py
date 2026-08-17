@@ -116,6 +116,7 @@ import duckdb
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 
+from src import console
 from src.gold.points_over_replacement import _SKILL_POSITIONS, _replacement_levels
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -317,6 +318,7 @@ def _add_within_season_columns(result: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+@console.analysis
 def _report(result: pd.DataFrame) -> None:
     sleeper = result[
         (result["league_key"] == "sleeper") & (result["consensus_adp"] <= 180)
@@ -411,7 +413,7 @@ def build_draft_value() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM draft_value").fetchone()
     con.close()
 
-    print(f"\nBuilt {count} rows into {WAREHOUSE_PATH} (table: draft_value)")
+    console.table("draft_value", count)
 
 
 if __name__ == "__main__":

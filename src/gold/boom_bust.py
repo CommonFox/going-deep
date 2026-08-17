@@ -73,6 +73,8 @@ from pathlib import Path
 
 import duckdb
 
+from src import console
+
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 # Reused from the source idea's own qualifier for a "full" season: fewer games than this means the
@@ -192,7 +194,7 @@ def build_boom_bust() -> None:
     (count,) = con.execute("SELECT COUNT(*) FROM boom_bust").fetchone()
     con.close()
 
-    print(f"Built {count} rows into {WAREHOUSE_PATH} (table: boom_bust)")
+    console.table("boom_bust", count)
 
 
 if __name__ == "__main__":
