@@ -28,18 +28,32 @@ if [ ${#notebooks[@]} -eq 0 ]; then
     exit 0
 fi
 
+# --execute runs every cell top to bottom in a fresh kernel, so a notebook that only works because
+# of state left behind by an earlier manual run fails here, which is the point.
+#
+# Clearing cell metadata is what keeps these notebooks reviewable. nbconvert stamps every cell with
+# wall-clock execution timings, so without this a re-run that changed nothing still produced a
+# ~130-line diff of pure timestamp churn — which trains you to skim notebook diffs, exactly when a
+# notebook diff is the thing telling you a finding moved. With it, re-running an unchanged
+# warehouse produces a byte-identical file, so any diff at all is a real change in the numbers.
+# Notebook-level metadata is preserved: that's where kernelspec lives.
+NBCONVERT_ARGS=(
+    --to notebook --execute --inplace
+    --ClearMetadataPreprocessor.enabled=True
+    --ClearMetadataPreprocessor.clear_cell_metadata=True
+    --ClearMetadataPreprocessor.clear_notebook_metadata=False
+)
+
 failed=0
 for notebook in "${notebooks[@]}"; do
     start=$SECONDS
     printf '%s' "$notebook"
-    # --execute runs every cell top to bottom in a fresh kernel, so a notebook that only works
-    # because of state left behind by an earlier manual run fails here, which is the point.
-    if jupyter nbconvert --to notebook --execute --inplace "$notebook" >/dev/null 2>&1; then
+    if jupyter nbconvert "${NBCONVERT_ARGS[@]}" "$notebook" >/dev/null 2>&1; then
         printf '  ok (%ds)\n' "$((SECONDS - start))"
     else
         printf '  FAILED\n'
         # Re-run without swallowing output so the traceback is visible.
-        jupyter nbconvert --to notebook --execute --inplace "$notebook" 2>&1 | tail -20 || true
+        jupyter nbconvert "${NBCONVERT_ARGS[@]}" "$notebook" 2>&1 | tail -20 || true
         failed=1
     fi
 done

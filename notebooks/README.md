@@ -93,7 +93,11 @@ If a query does fail with a lock error, a build is running — wait for it to fi
 - Report the negative results too. Half of `punting.ipynb` is things that turned out not to
   work (matchup, weather, field position as a predictor), and that half is what stops the same
   dead ends being explored twice.
-- Commit with outputs. The outputs *are* the saved answer, which is the whole point — the cost is
-  noisier diffs, which is the right trade for a notebook that's appended to rather than edited.
+- Commit with outputs, and refresh them through `scripts/run_notebooks.sh` rather than by hand.
+  The outputs *are* the saved answer, which is the whole point of committing them; the script
+  strips the wall-clock execution timings nbconvert stamps on every cell, so re-running against an
+  unchanged warehouse rewrites the file byte for byte identically. That matters more than it
+  sounds: without it a no-op re-run produced a ~130-line diff, and a notebook diff you've learned
+  to skim is worthless exactly when it's telling you a finding moved.
 - Models and pipeline code belong in `src/`, not here. A notebook that starts growing functions
   other notebooks want is telling you it should be a module.
