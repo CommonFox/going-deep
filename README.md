@@ -29,7 +29,11 @@ network access of their own.
   May, snapshots run from the previous March through the summer, and preseason rosters carry
   `draft_number`/`years_exp` — so those three are fetched a year further forward. That is what
   gives `inhouse_projections` a role signal and a rookie draft board for the season it projects.
-  Bump `_UPCOMING_SEASON` once a year.
+  Bump `_UPCOMING_SEASON` once a year. Also loads `pbp_punts`: every punt play since 2015, read
+  straight from nflverse's play-by-play release with rows and columns pruned at fetch time (~2k
+  punts a season out of ~50k plays, against ~370 columns). Play-by-play is the only feed carrying
+  where a punt came to rest, which is what "punts inside the 10" — a scoring category in the ESPN
+  league and in no per-player feed anywhere — has to be derived from.
 - `src/silver/sleeper.py` — Sleeper's public league API (no auth required): league settings,
   rosters, users, weekly matchups (including starting lineups), transactions, current NFL state,
   and the full player dictionary. Set `LEAGUE_ID` in the module before running.
@@ -138,8 +142,9 @@ network access of their own.
   tables — no fetch step, no network.
 - `src/gold/league_settings.py` — builds `league_settings`: one row per league (Sleeper, ESPN)
   normalizing each platform's scoring rules (points per reception/yard/TD/turnover, etc.) and
-  starting-roster construction (team count and QB/RB/WR/TE/FLEX/superflex/bench/IR slot counts)
-  into a shared schema. Sleeper's settings arrive as flat columns; ESPN's arrive as a nested array
+  starting-roster construction (team count and QB/RB/WR/TE/FLEX/superflex/K/P/bench/IR slot counts)
+  into a shared schema, including the ten punting categories the ESPN league scores and Sleeper
+  has no concept of. Sleeper's settings arrive as flat columns; ESPN's arrive as a nested array
   of `{statId, points}` items and a slot-id-keyed lineup dict, both keyed by undocumented numeric
   IDs (mapped here using the cwendt94/espn-api project's reference tables, spot-checked against
   this league's actual raw settings). Exists so scoring-sensitive models (e.g. league-winning-RB
@@ -228,6 +233,38 @@ network access of their own.
   filled from that pool regardless of position — so a position that wins more flex spots in a given
   season automatically gets a deeper replacement level, with no hardcoded split. Pure SQL/Python
   over already-loaded tables — no fetch step, no network.
+- `src/gold/punters.py` — builds `punter_seasons`, `punter_projections` and `punter_backtest`: the
+  ESPN league starts a punter, and no external source in this warehouse prices the position, so
+  this is the one model that stands entirely on its own. Punter-weeks are scored under
+  `league_settings`' punting categories week by week (the gross-average bonus is awarded per game,
+  so a season total can't produce it), with inside-the-10 punts derived from `pbp_punts` — verified
+  against ESPN's own published actuals to within nine punts league-wide.
+
+  The projection is a component model rather than a learner, because there isn't the data to
+  support one: ~250 usable consecutive punter-season pairs, and per-punt rates that self-correlate
+  between r=0.06 and r=0.21. Each component is an empirical-Bayes estimate shrunk toward the league
+  rate by a constant fit on training seasons only, so a stat that doesn't persist collapses to the
+  mean instead of inventing an edge. Two structural choices do the real work: **volume comes from
+  the team, not the punter** (punt volume is a property of a bad offense — for punters who changed
+  teams, their new team's prior punt rate predicts them better than their own history does), and
+  **expected games comes from incumbency** (a punter who held the same job last season averages
+  15.3 games and 148 points; everyone else, ~12 games and ~117). Walk-forward 2019-2025 it beats
+  every naive baseline on MAE, RMSE and rank correlation — and still can't reliably pick the top
+  five, because who keeps the job in November is the dominant term and nothing predicts it. Pure
+  SQL/Python over already-loaded tables — no fetch step, no network.
+- `src/gold/punt_environment.py` — builds `punt_environment`: one row per team-season describing
+  the punting situation a team creates, on offense (how often it punts, from where, and what those
+  punts are worth) and on defense (punts forced and punter points allowed — the matchup side).
+  Exists because the intuition behind `punters.py`'s volume model is only half right. A punt struck
+  from the opponent's side of the field is worth 3.73 league points; one from inside a team's own
+  10 is worth 0.39 — less than the flat point a punt pays, because two-thirds get returned. So
+  teams that punt most punt from deeper and lose ~11% of their value per punt, and volume still
+  wins comfortably (5.60 punt points a game in the fewest-punting quintile against 8.72 in the
+  most). The table is **diagnostic, not predictive**, and the docstring says why: average punt spot
+  explains a team's points per punt at r=0.61 within a season but predicts next season's punter
+  scoring at r=0.02, matchup-aware weekly rankings score no better out of sample than team punt
+  rate alone, and weather doesn't order at all. Pure SQL/Python over already-loaded tables — no
+  fetch step, no network.
 - `src/gold/boom_bust.py` — builds `boom_bust`: classifies each skill-position player-season into
   an outcome bucket (League Winner/Delivered/Beat His Price/Met His Price/Fine/Busted/Got Injured/
   Never Had The Job/No Preseason ADP), measured on an **absolute** scale rather than a relative
@@ -317,6 +354,7 @@ A Python 3.11 virtualenv lives at `.venv/` (gitignored):
 ```bash
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -r requirements-notebooks.txt   # optional, only for notebooks/
 ```
 
 ## Usage
@@ -338,4 +376,24 @@ Query the warehouse with the DuckDB CLI or Python:
 
 ```bash
 python -c "import duckdb; print(duckdb.connect('data/warehouse.duckdb').sql('SHOW TABLES'))"
+```
+
+## Notebooks (`notebooks/`)
+
+Findings worth keeping, written as live queries so re-running updates them instead of leaving them
+stale — see `notebooks/README.md`. `src/query.py` is the read-only accessor they use:
+
+```python
+from src.query import q, tables, columns, peek
+
+q("SELECT * FROM punter_projections ORDER BY projected_points DESC LIMIT 10")
+```
+
+It opens a connection per call and closes it, on purpose. DuckDB takes a file lock on the
+warehouse — one writer or many readers — and a long-lived notebook kernel holding one will make
+`build_warehouse.sh` fail with `Could not set lock on file` with nothing pointing at the notebook
+as the cause.
+
+```bash
+./scripts/run_notebooks.sh          # re-execute every notebook against the current warehouse
 ```

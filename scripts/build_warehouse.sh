@@ -58,9 +58,12 @@ run src.gold.league_settings
 
 # Second tier — inhouse_projections needs every first-tier table except league_settings
 # (player_weighted_baselines, the two grade tables, player_depth_chart, and adp_consensus as its
-# backtest benchmark); points_over_replacement needs league_settings for per-league scoring.
+# backtest benchmark); points_over_replacement needs league_settings for per-league scoring, and
+# punters needs it for the punt scoring no other league prices.
 run src.gold.inhouse_projections
 run src.gold.points_over_replacement
+run src.gold.punters
+run src.gold.punt_environment
 
 # Third tier — consensus blends every external source plus inhouse_projections; boom_bust and
 # breakout_candidates each read a second-tier table alongside adp_consensus.

@@ -46,6 +46,13 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
     function so a quiet build skips the work, not just the printing.
 - `python -m src.summary` lists every warehouse table and its row count; `--brief` gives the
   per-layer roll-up the build script ends with.
+- `notebooks/` holds findings as live queries (see `notebooks/README.md` for the conventions).
+  Read the warehouse from a notebook through `src/query.py`'s `q()`/`tables()`/`columns()`/`peek()`
+  — never `duckdb.connect()` directly. DuckDB locks the warehouse file (one writer or many
+  readers), and a notebook kernel holding a connection makes `build_warehouse.sh` fail with an
+  error that doesn't mention notebooks. `q()` opens and closes per call to avoid exactly that.
+  Notebooks compute their numbers rather than quoting them, and are committed with outputs;
+  `scripts/run_notebooks.sh` re-executes them after a rebuild. Anything reusable belongs in `src/`.
 - One feature per branch, with frequent commits pushed to `origin` so work can resume from a
   different machine. Use conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, etc.) for
   commit subjects.

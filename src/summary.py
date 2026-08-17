@@ -22,7 +22,7 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 # siblings. Anything new and unprefixed lands in gold, which is where new models go.
 _SILVER_PREFIXES = (
     "weekly_stats", "schedules", "rosters", "snap_counts", "injuries", "depth_chart", "ids",
-    "players", "ngs_", "ftn_", "pfr_advstats", "sleeper_", "espn_", "fantasypros_", "ffc_",
+    "players", "ngs_", "ftn_", "pbp_", "pfr_advstats", "sleeper_", "espn_", "fantasypros_", "ffc_",
     "fftoday_", "cbs_",
 )
 

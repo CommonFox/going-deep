@@ -147,8 +147,10 @@ def load_player_ownership(raw_path: Path) -> None:
 
 
 # ESPN's numeric defaultPositionId, mapped to the position strings used elsewhere in this
-# warehouse (e.g. the nflverse `ids` crosswalk).
-POSITION_IDS = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DST"}
+# warehouse (e.g. the nflverse `ids` crosswalk). Punters are here because this league starts one
+# (lineup slot 18) — ESPN projects them in full, and no other source in this warehouse projects
+# punters at all.
+POSITION_IDS = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 7: "P", 16: "DST"}
 
 
 def load_projections(raw_path: Path, season: int) -> None:
