@@ -57,28 +57,41 @@ is an artifact of being the only person at the table with a plan.
 
 ## The superflex counterfactual
 
-Neither league is superflex. Both were checked against the platforms' own raw settings, not
-inferred: ESPN's lineup slot 7 (`OP`, the superflex slot) is 0, and Sleeper's `roster_positions`
-contains no `SUPER_FLEX`. `variant = 'actual'` is therefore what these leagues really are.
+ESPN is not superflex: lineup slot 7 (`OP`, its superflex slot) is 0, checked against the platform's
+own raw settings, not inferred. Sleeper *is*, as of a mid-August league change — `roster_positions`
+now contains a `SUPER_FLEX` entry, alongside a jump from 12 to 14 teams. `variant = 'actual'` is
+therefore Sleeper's real superflex answer, not a preview of one; it already carries the effect
+described below.
 
-`variant = 'superflex'` runs the same sweep with one bench spot converted into a superflex slot —
-roster size unchanged, so the draft is the same length — purely to answer "how much would that
-change things". It is a counterfactual and it flatters early quarterbacks twice over, which is worth
-being explicit about: the ADP board is still a 1QB board (FantasyPros and FFC price for the formats
-their users play), so the focal team buys quarterbacks at 1QB prices for a superflex lineup. Real
-superflex ADP has already repriced that. Read `variant = 'superflex'`, `field_model = 'mixed'` as
-the *upper* bound on what an early quarterback is worth, and the gap between it and
-`variant = 'actual'` as the thing the slot itself is doing.
+`variant = 'superflex'` runs the same sweep with one bench spot converted into an *additional*
+superflex slot — roster size unchanged, so the draft is the same length. For ESPN that is still the
+original counterfactual ("what if this league added a superflex slot"); for Sleeper it now asks a
+narrower question, "what would a *second* superflex slot be worth on top of the one it already has".
+Both readings flatter early quarterbacks the same way and it is worth being explicit about it: the
+ADP board is still a 1QB board (FantasyPros and FFC price for the formats their users play), so the
+focal team buys quarterbacks at 1QB prices for a lineup that wants two or three. Real superflex ADP
+has already repriced that, and the gap should be expected to close as Sleeper's own market catches
+up to its own rules. Read `variant = 'superflex'`, `field_model = 'mixed'` as an *upper* bound on
+what an extra quarterback slot is worth, and Sleeper's `variant = 'actual'` numbers as the closest
+thing here to a fair, if still early, read of the slot it already has.
 
 ## What the tables say, in short
 
-Under both leagues' actual settings, a quarterback-free, receiver-leaning opening beats an
-RB-heavy one, and the "full house" 3RB+2WR opening lands slightly *below* the pure-ADP control.
-The effect is real but small — a few tens of points across a ~1,500-point season, on the order of
-1-2% — which is itself the finding: opening composition is worth about one good waiver claim, and
-strategies that hard-commit to one position (5RB, 5WR) are the only ones that genuinely hurt.
-Everything the notebook needs to show that is in `draft_strategy_summary`; `draft_strategy_results`
-keeps every individual simulated draft so any of it can be re-cut by season or draft slot.
+Under ESPN's actual settings, a quarterback-free, receiver-leaning opening beats an RB-heavy one,
+and the "full house" 3RB+2WR opening lands slightly *below* the pure-ADP control — the effect is
+real but small, on the order of a few tens of points across a season, which is itself the finding:
+opening composition there is worth about one good waiver claim, and strategies that hard-commit to
+one position (5RB, 5WR) are the only ones that genuinely hurt.
+
+Sleeper no longer tells the same story. Under its real superflex settings, quarterback count in the
+opening is worth roughly +59 points per pick added (t = 7.36 across eleven seasons) — an order of
+magnitude past anything the composition question ever produced, and by a wide margin the largest,
+most significant effect either league's sweep has found. The old "full house" question (RB vs. WR
+composition) still resolves the same way underneath that — a shallow, early-rounds-only scarcity
+that a 3RB opening overspends on — but it is now a second-order decision behind "take two
+quarterbacks first." Everything the notebook needs to show both stories is in
+`draft_strategy_summary`; `draft_strategy_results` keeps every individual simulated draft so any of
+it can be re-cut by season or draft slot.
 """
 
 import itertools
