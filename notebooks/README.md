@@ -11,7 +11,7 @@ stays true.
 | Notebook | What's in it |
 |---|---|
 | `punting.ipynb` | Everything the warehouse knows about punters: what the league scores, what's predictable, why bad offenses make good fantasy punters, whether matchup matters, the model and its backtest, and this year's projections. |
-| `draft_strategy.ipynb` | What roster construction is worth in each league: whether running back scarcity is real, what each round returns by position, ~81k simulated drafts ranking every five-round opening, why almost none of it clears significance, and what changes under superflex. |
+| `draft_strategy.ipynb` | What roster construction is worth in each league: whether running back scarcity is real, what each round returns by position, ~89k simulated drafts ranking every five-round opening, and why Sleeper's real superflex format now dominates that answer while ESPN's non-superflex one still comes down to noise. |
 
 ## Setup
 

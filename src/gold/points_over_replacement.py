@@ -18,8 +18,11 @@ RB/WR/TE is pooled, ranked by points, and FLEX slots (`team_count x flex_slots`)
 that pool regardless of position. A position's replacement level is whoever's first left off after
 both its dedicated slots and its share of FLEX are accounted for — so a position that wins more
 flex spots in a given season automatically gets a deeper (lower) replacement level, with no
-hardcoded split. Both leagues currently have zero superflex slots, so QB has no flex eligibility
-and sits outside the pool.
+hardcoded split. A league with superflex slots adds QB's leftover into that same pool alongside
+RB/WR/TE, and grows the pool by `team_count x superflex_slots` — matching the superflex slot's own
+eligibility in `draft_strategy.py`'s lineup scorer, which fills it from leftover FLEX-eligible
+players and leftover QBs together. A league with zero superflex slots leaves QB out of the pool
+entirely, as before.
 
 Scoped to skill positions (QB/RB/WR/TE), matching adp_consensus.py/player_baselines.py.
 """
@@ -104,10 +107,11 @@ def _replacement_levels(season_df: pd.DataFrame, league: pd.Series) -> pd.DataFr
         pos: int(league["team_count"] * league[_SLOT_COLUMNS[pos]]) for pos in _SKILL_POSITIONS
     }
 
+    flex_pool_positions = _FLEX_POSITIONS + (("QB",) if league["superflex_slots"] else ())
     leftover = pd.concat(
-        ranked[pos].iloc[dedicated_starters[pos]:] for pos in _FLEX_POSITIONS
+        ranked[pos].iloc[dedicated_starters[pos]:] for pos in flex_pool_positions
     ).sort_values("league_points", ascending=False)
-    flex_starters_count = int(league["team_count"] * league["flex_slots"])
+    flex_starters_count = int(league["team_count"] * (league["flex_slots"] + league["superflex_slots"]))
     flex_starters_by_position = leftover.iloc[:flex_starters_count]["position"].value_counts()
 
     rows = []
