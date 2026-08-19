@@ -55,30 +55,46 @@ re-run reproduces byte-for-byte), three replicates per draft. Any edge that surv
 is also deviating is an edge in a real draft room; any edge that only exists against a passive field
 is an artifact of being the only person at the table with a plan.
 
-## The superflex counterfactual
+## Superflex is a format, not a counterfactual
 
-Neither league is superflex. Both were checked against the platforms' own raw settings, not
-inferred: ESPN's lineup slot 7 (`OP`, the superflex slot) is 0, and Sleeper's `roster_positions`
-contains no `SUPER_FLEX`. `variant = 'actual'` is therefore what these leagues really are.
+**Sleeper is a superflex league and ESPN is not.** Both are read from the platforms' own raw
+settings rather than inferred: Sleeper's `roster_positions` contains a `SUPER_FLEX` entry (it
+converted one of its two flex spots in August 2026, at the same time it went from 12 teams to 14),
+and ESPN's lineup slot 7 (`OP`, its superflex slot) is 0.
 
-`variant = 'superflex'` runs the same sweep with one bench spot converted into a superflex slot —
-roster size unchanged, so the draft is the same length — purely to answer "how much would that
-change things". It is a counterfactual and it flatters early quarterbacks twice over, which is worth
-being explicit about: the ADP board is still a 1QB board (FantasyPros and FFC price for the formats
-their users play), so the focal team buys quarterbacks at 1QB prices for a superflex lineup. Real
-superflex ADP has already repriced that. Read `variant = 'superflex'`, `field_model = 'mixed'` as
-the *upper* bound on what an early quarterback is worth, and the gap between it and
-`variant = 'actual'` as the thing the slot itself is doing.
+So `variant` names a *format*, not an edit: `'1qb'` has no superflex slot and `'superflex'` has one.
+For Sleeper `'superflex'` is the real league and `'1qb'` is the counterfactual; for ESPN it is the
+other way round. `_actual_variant()` is the lookup, and nothing downstream should hard-code either
+value as "the real one" — that is exactly the assumption that went stale when the league changed.
+
+The counterfactual direction still flatters early quarterbacks, which is worth being explicit about:
+the ADP board is a 1QB board (FantasyPros and FFC price for the formats their users play), so a
+focal team in a superflex lineup buys quarterbacks at 1QB prices. Real superflex ADP has already
+repriced that. Read Sleeper's superflex quarterback numbers as an *upper* bound, and the gap between
+the two variants as what the slot itself is doing.
 
 ## What the tables say, in short
 
-Under both leagues' actual settings, a quarterback-free, receiver-leaning opening beats an
-RB-heavy one, and the "full house" 3RB+2WR opening lands slightly *below* the pure-ADP control.
-The effect is real but small — a few tens of points across a ~1,500-point season, on the order of
-1-2% — which is itself the finding: opening composition is worth about one good waiver claim, and
-strategies that hard-commit to one position (5RB, 5WR) are the only ones that genuinely hurt.
-Everything the notebook needs to show that is in `draft_strategy_summary`; `draft_strategy_results`
-keeps every individual simulated draft so any of it can be re-cut by season or draft slot.
+The two leagues no longer give the same answer, and the split is the superflex slot.
+
+In **ESPN** (10 teams, 1QB) opening composition is worth about one good waiver claim: no position's
+slope clears significance, the inverted-U shape means only the extremes (5RB, 5WR, zero of a
+position) genuinely hurt, and the sweep identifies losers rather than winners.
+
+In **Sleeper** (14 teams, superflex since August 2026) the quarterback slope is the largest effect
+in the model by a wide margin, positive in essentially every season; every top-ten opening takes a
+quarterback and the top seven take two. The "full house" 3RB+2WR opening is significantly *bad* in
+both leagues, and `2RB2WR1TE` — which was the best cross-league opening under Sleeper's old
+settings — is significantly bad under its new ones.
+
+The pure-ADP control deserves its own warning. `adp_consensus` is a **1QB board**: the sources price
+for the formats their users mostly play, so best-available never takes a second quarterback. That is
+harmless in ESPN and expensive in Sleeper, where the control is now a below-average plan against
+either field. Read it as a bias in the board rather than a verdict on discipline — a real superflex
+ADP board would close most of the gap, and not having one is the biggest known limitation here.
+
+Everything the notebook needs is in `draft_strategy_summary`; `draft_strategy_results` keeps every
+individual simulated draft so any of it can be re-cut by season or draft slot.
 """
 
 import itertools
@@ -119,6 +135,21 @@ _SUPERFLEX_QB_CAP = 4
 # Replicates for the mixed field. Each one redraws every opponent's opening, so the spread across
 # them is the noise floor for "how much does the rest of the room matter"; three is enough to keep
 # that from dominating a strategy's mean without tripling the build time again.
+# The two lineup formats the sweep runs for every league. These are formats, not edits: whichever
+# one matches a league's real settings is that league's actual format, and the other is the
+# counterfactual. Sleeper is 'superflex' and ESPN is '1qb' as of August 2026.
+_VARIANTS = ("1qb", "superflex")
+
+
+def _actual_variant(league: pd.Series) -> str:
+    """Which variant is the league's real format, per its `league_settings` row."""
+    return "superflex" if int(league["superflex_slots"]) else "1qb"
+
+
+# Below this spread across per-season means, a strategy's vs-field is floating-point dust rather
+# than an effect — see the note in _summarize. One millionth of a fantasy point.
+_ZERO_SPREAD = 1e-6
+
 _MIXED_REPLICATES = 3
 _SEED = 20260816
 
@@ -170,16 +201,30 @@ ORDER BY l.league_key, adp.season, adp.consensus_adp
 def _lineup(league: pd.Series, variant: str) -> dict:
     """Starting slots, draft length and roster caps for one league under one variant.
 
-    The superflex variant converts a *bench* spot into a superflex slot rather than adding one, so
-    both variants draft the same number of rounds and the comparison isn't confounded by roster size.
+    `variant` names the lineup rather than an edit to it: `'1qb'` has no superflex slot, `'superflex'`
+    has exactly one. Whichever matches a league's real `league_settings` row is that league's actual
+    format and the other is its counterfactual — so the same two variants cover both leagues no
+    matter which side of the change they sit on. `_actual_variant` is the lookup.
+
+    The slot is traded against a *flex* spot where there is one, which is the change a league
+    actually makes when it goes superflex (Sleeper converted one of its two flexes in August 2026).
+    That holds both roster size and starter count constant, so the only thing moving between the two
+    variants is whether a quarterback is eligible for the slot. Only if a league has no flex to trade
+    does the slot come out of the bench instead, which keeps roster size constant but not starters.
     """
     slots = {pos: int(league[f"{pos.lower()}_slots"]) for pos in _POSITIONS}
     flex = int(league["flex_slots"])
     superflex = int(league["superflex_slots"])
     bench = int(league["bench_slots"])
-    if variant == "superflex":
-        superflex += 1
-        bench -= 1
+
+    delta = (1 if variant == "superflex" else 0) - superflex
+    superflex += delta
+    if delta > 0:  # take the slot from a flex spot, or the bench if the league has no flex
+        from_flex = min(delta, flex)
+        flex -= from_flex
+        bench -= delta - from_flex
+    elif delta < 0:  # hand it back the way it was taken
+        flex += -delta
 
     caps = dict(_ROSTER_CAPS)
     if superflex:
@@ -399,10 +444,22 @@ def _summarize(results: pd.DataFrame) -> pd.DataFrame:
         top_third=results["finish_rank"] <= np.ceil(results["team_count"] / 3)
     )
 
+    # The pure-ADP control's vs-field is zero by construction: every team drafts the same way, so
+    # the focal team *is* the field. What survives into the per-season means is floating-point dust
+    # on the order of 1e-13, and t-testing eleven dust values against zero returns a confidently
+    # significant result (t = -4.4, p = 0.001) for a quantity that is identically zero. A spread
+    # this far below a single fantasy point is noise in the arithmetic rather than an effect, so
+    # snap it to zero and leave the test undefined — the control is the reference line, not a
+    # competitor with a p-value.
+    dust = by_season.groupby(keys)["points_vs_field"].transform(
+        lambda values: np.ptp(values) < _ZERO_SPREAD
+    )
+    by_season.loc[dust, "points_vs_field"] = 0.0
+
     tests = []
     for key, group in by_season.groupby(keys):
         values = group["points_vs_field"].to_numpy()
-        if len(values) > 1 and values.std() > 0:
+        if len(values) > 1 and np.ptp(values) > _ZERO_SPREAD:
             t_stat, p_value = stats.ttest_1samp(values, 0.0)
         else:
             t_stat, p_value = np.nan, np.nan
@@ -422,9 +479,10 @@ def _summarize(results: pd.DataFrame) -> pd.DataFrame:
 
 
 @console.analysis
-def _report(summary: pd.DataFrame) -> None:
+def _report(summary: pd.DataFrame, leagues: pd.DataFrame) -> None:
+    actual = {row["league_key"]: _actual_variant(row) for _, row in leagues.iterrows()}
     for league_key in sorted(summary["league_key"].unique()):
-        for variant in ("actual", "superflex"):
+        for variant in _VARIANTS:
             block = summary[
                 (summary["league_key"] == league_key)
                 & (summary["variant"] == variant)
@@ -433,7 +491,8 @@ def _report(summary: pd.DataFrame) -> None:
             ].sort_values("points_vs_field", ascending=False)
             if block.empty:
                 continue
-            print(f"\n{league_key} / {variant} — opening composition vs a pure-ADP field")
+            label = "actual" if actual.get(league_key) == variant else "counterfactual"
+            print(f"\n{league_key} / {variant} ({label}) — opening composition vs a pure-ADP field")
             print(f"  {'strategy':<14} {'vs field':>9} {'rank':>6} {'win%':>6} {'t':>6} "
                   f"{'seasons+':>9}")
             shown = pd.concat([block.head(6), block[block["strategy_kind"] == "control"],
@@ -458,13 +517,13 @@ def build_draft_strategy() -> None:
         _sweep(board[board["league_key"] == league["league_key"]], league, variant, field_model,
                strategies, orderings)
         for _, league in leagues.iterrows()
-        for variant in ("actual", "superflex")
+        for variant in _VARIANTS
         for field_model in ("adp", "mixed")
     ]
     results = pd.concat(frames, ignore_index=True)
     summary = _summarize(results)
 
-    _report(summary)
+    _report(summary, leagues)
 
     con = duckdb.connect(str(WAREHOUSE_PATH))
     con.execute("CREATE OR REPLACE TABLE draft_strategy_results AS SELECT * FROM results")
