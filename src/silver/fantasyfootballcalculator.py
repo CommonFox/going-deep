@@ -6,9 +6,18 @@ FFC's own docs just ask not to call it too frequently, so requests here are spac
 
 The `teams` query parameter turns out to be cosmetic: comparing responses for the same
 season/format across `teams=8/10/12/14` shows identical underlying `adp` values and
-`total_drafts` counts, only the `adp_formatted` round.pick display string changes. So this is one
-pooled ADP dataset per scoring format/season (not genuinely split by league size), fixed here at
-teams=12 since that's the value FFC's own site defaults to.
+`total_drafts` counts, only the `adp_formatted` round.pick display string changes (re-checked for
+`2qb`, which behaves the same way). So this is one pooled ADP dataset per scoring format/season
+(not genuinely split by league size), fixed here at teams=12 since that's the value FFC's own site
+defaults to.
+
+`2qb` is FFC's superflex board, and despite sitting on the same endpoint it is **not** a scoring
+format: nothing about how points are awarded changes, only how many quarterbacks a lineup starts.
+It is filed under `scoring_format` here anyway, because silver's job is to mirror the source as it
+arrives; gold is where the two axes get separated (`adp_consensus` carries a `format` dimension so
+a superflex model reads a superflex board). The distinction is not academic — the 2QB board prices
+Josh Allen at 1.7 overall where every 1QB board has him outside the top 60, so a superflex league
+priced off a 1QB board is reading the wrong sheet entirely.
 
 One fetch call per (scoring format, season) pair (FFC has no batched multi-year endpoint), so raw
 files are saved one per pair and `load_adp_all` rebuilds the whole table from every raw file
@@ -30,7 +39,7 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 BASE_URL = "https://fantasyfootballcalculator.com/api/v1"
 
 TEAMS = 12
-SCORING_FORMATS = ["standard", "half-ppr", "ppr"]
+SCORING_FORMATS = ["standard", "half-ppr", "ppr", "2qb"]
 
 # 2026 included even though the season hasn't been played yet: this year's preseason ADP is
 # useful as live input to a trained model, just not as a backtestable season.
