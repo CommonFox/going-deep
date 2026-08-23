@@ -68,6 +68,24 @@ unreliable, so the haircut here is a floor on the real durability gap, not an es
 same basis, so the two are internally consistent and the gap between them is readable as exactly
 what the durability haircut is doing to a given player.
 
+## The offensive line, for running backs only
+
+Each player carries his team's offensive line grade from the *prior* season — knowable at draft
+time — and running backs additionally carry the quartile it falls in. Backs behind a bottom-quartile
+line returned **-6.6** points of surplus against their draft price and beat that price only 35% of
+the time; behind a top-quartile line, **+20.3** and 56%. A 27-point swing, p=0.0055, measured
+against ADP, so it is signal the market is not already charging for.
+
+It is deliberately a warning rather than a ranking input. The relationship is not monotonic — the
+third quartile scores slightly better than the fourth — so it identifies backs to be wary of rather
+than backs to chase, and the board leaves the value untouched and lets the reader apply it.
+
+Only backs get the tier, because only backs show the effect. Against the same prior-season grade,
+quarterbacks come out at r=-0.147 (positive in 2 of 7 seasons), tight ends +0.113 (1 of 5) and
+receivers -0.048 (3 of 7) — all indistinguishable from nothing. Running backs are +0.194 at
+p=0.0009 and positive in **7 of 7**. Extending the flag to the other three would be dressing noise
+up as advice.
+
 ## What this does not model
 
 Replacement level is treated as fixed for the season, and it isn't. Useful running backs appear on
@@ -112,6 +130,7 @@ _SCORING_BASES = {1.0: "ppr", 0.5: "half_ppr"}
 
 _OUTPUT_COLUMNS = [
     "league_key", "season", "format", "scoring", "player_id", "player_name", "position", "team",
+    "ol_grade", "ol_tier",
     "projected_points", "projected_points_adjusted", "projected_floor", "projected_ceiling",
     "availability", "availability_source",
     "espn_points", "sleeper_points", "cbs_points", "fftoday_points", "inhouse_points",
@@ -324,6 +343,45 @@ def _adp(con: duckdb.DuckDBPyConnection, season: int, adp_format: str) -> pd.Dat
     return pd.concat([players, defenses], ignore_index=True)
 
 
+def _team_context(con: duckdb.DuckDBPyConnection, season: int) -> pd.DataFrame:
+    """Each player's team and the line he runs behind, graded before the season starts.
+
+    The grade is the prior season's, which is the only one that exists on draft day. `ol_tier` is
+    left NULL for everyone but running backs — see the module docstring for why the other three
+    positions don't get one.
+    """
+    df = con.execute(
+        """
+        WITH rostered AS (
+            SELECT player_id, mode(team) AS team FROM rosters WHERE season = ? GROUP BY player_id
+        ),
+        -- Cut on the grade's own value, not on row position: ntile() would split the four teams
+        -- that share a grade of exactly 66.1 across two different tiers depending on row order,
+        -- which is precisely the kind of arbitrary boundary a draft-night warning must not have.
+        cuts AS (
+            SELECT quantile_cont(ol_grade, 0.25) AS q1,
+                   quantile_cont(ol_grade, 0.50) AS q2,
+                   quantile_cont(ol_grade, 0.75) AS q3
+            FROM offensive_line_grades WHERE season = ?
+        ),
+        line AS (
+            SELECT team, ol_grade,
+                   CASE WHEN ol_grade <= (SELECT q1 FROM cuts) THEN 1
+                        WHEN ol_grade <= (SELECT q2 FROM cuts) THEN 2
+                        WHEN ol_grade <= (SELECT q3 FROM cuts) THEN 3
+                        ELSE 4 END AS tier
+            FROM offensive_line_grades WHERE season = ?
+        )
+        SELECT r.player_id, r.team, line.ol_grade, line.tier
+        FROM rostered r LEFT JOIN line ON line.team = r.team
+        """,
+        [season, season - 1, season - 1],
+    ).df()
+    labels = {1: "Q1 worst", 2: "Q2", 3: "Q3", 4: "Q4 best"}
+    df["ol_tier"] = df["tier"].map(labels)
+    return df[["player_id", "team", "ol_grade", "ol_tier"]]
+
+
 def _build_league(con: duckdb.DuckDBPyConnection, league: pd.Series, season: int) -> pd.DataFrame:
     scoring = _scoring_basis(league)
     adp_format = _league_format(league)
@@ -350,12 +408,14 @@ def _build_league(con: duckdb.DuckDBPyConnection, league: pd.Series, season: int
 
     df = adjusted.merge(raw, on=["player_id", "position"], how="left")
     df = df.merge(_adp(con, season, adp_format), on="player_id", how="left")
+    df = df.merge(_team_context(con, season), on="player_id", how="left")
+    df["ol_tier"] = df["ol_tier"].where(df["position"] == "RB")
+    # Defenses are keyed on their own team abbreviation, so they name themselves.
+    df["team"] = df["team"].fillna(df["player_id"].where(df["position"] == "DST"))
     df["league_key"] = league["league_key"]
     df["season"] = season
     df["format"] = adp_format
     df["scoring"] = scoring
-    if "team" not in df:
-        df["team"] = pd.NA
     return df[_OUTPUT_COLUMNS].sort_values("points_over_replacement", ascending=False)
 
 
