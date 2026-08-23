@@ -107,12 +107,37 @@ def _replacement_levels(season_df: pd.DataFrame, league: pd.Series) -> pd.DataFr
         pos: int(league["team_count"] * league[_SLOT_COLUMNS[pos]]) for pos in _SKILL_POSITIONS
     }
 
-    flex_pool_positions = _FLEX_POSITIONS + (("QB",) if league["superflex_slots"] else ())
-    leftover = pd.concat(
-        ranked[pos].iloc[dedicated_starters[pos]:] for pos in flex_pool_positions
-    ).sort_values("league_points", ascending=False)
-    flex_starters_count = int(league["team_count"] * (league["flex_slots"] + league["superflex_slots"]))
-    flex_starters_by_position = leftover.iloc[:flex_starters_count]["position"].value_counts()
+    # FLEX and SUPER_FLEX are different eligibility sets and have to be filled separately: a
+    # quarterback can start in a superflex slot but not in a plain flex one. Filling them from a
+    # single combined pool lets leftover quarterbacks — who outscore leftover RB/WR/TE almost by
+    # definition — win flex spots they are not eligible for, which pushes the quarterback
+    # replacement level far too deep and inflates every quarterback's value. In a 14-team league
+    # with one of each slot it counted 31 quarterback starters where only 28 can exist.
+    #
+    # The narrower pool is filled first, which is optimal here because superflex eligibility is a
+    # superset of flex eligibility: anyone displaced from flex can still be picked up by superflex,
+    # but not the other way round.
+    leftover = {
+        pos: ranked[pos].iloc[dedicated_starters[pos]:] for pos in _SKILL_POSITIONS
+    }
+
+    flex_starters = pd.concat(
+        [leftover[pos] for pos in _FLEX_POSITIONS]
+    ).sort_values("league_points", ascending=False).iloc[
+        : int(league["team_count"] * league["flex_slots"])
+    ]
+
+    superflex_positions = _FLEX_POSITIONS + (("QB",) if league["superflex_slots"] else ())
+    superflex_pool = pd.concat([leftover[pos] for pos in superflex_positions])
+    superflex_starters = superflex_pool[
+        ~superflex_pool["player_id"].isin(flex_starters["player_id"])
+    ].sort_values("league_points", ascending=False).iloc[
+        : int(league["team_count"] * league["superflex_slots"])
+    ]
+
+    flex_starters_by_position = pd.concat(
+        [flex_starters, superflex_starters]
+    )["position"].value_counts()
 
     rows = []
     for pos in _SKILL_POSITIONS:
