@@ -77,7 +77,11 @@ from src.gold.draft_strategy import (
     _lineup,
 )
 
-WAREHOUSE_PATH = Path("data/warehouse.duckdb")
+# Resolved from this file rather than the working directory, unlike the other gold modules'
+# relative `Path("data/warehouse.duckdb")`. Those only ever run as `python -m src...` from the repo
+# root, but `simulate_first_pick` is meant to be called from a notebook, whose working directory
+# depends on where the kernel started — the same reasoning as src/query.py.
+WAREHOUSE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "warehouse.duckdb"
 
 # Below this the number is noise dressed as precision — a player 60 picks past his ADP is "gone",
 # and carrying four decimal places of a 0.001 tail probability for every player at every pick just
