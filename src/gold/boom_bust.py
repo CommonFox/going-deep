@@ -102,7 +102,7 @@ WITH preseason AS (
             PARTITION BY season, position ORDER BY consensus_adp DESC
         ) AS preseason_percentile
     FROM adp_consensus
-    WHERE consensus_adp IS NOT NULL
+    WHERE consensus_adp IS NOT NULL AND format = '1qb'
 ),
 -- "When he was on the field, was it his job?" — the depth chart restricted to the weeks he
 -- actually recorded a game, so a starter who is hurt from week 4 on isn't diluted by the weeks he

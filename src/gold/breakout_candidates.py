@@ -40,7 +40,7 @@ WITH preseason AS (
             PARTITION BY season, position ORDER BY consensus_adp DESC
         ) AS preseason_percentile
     FROM adp_consensus
-    WHERE consensus_adp IS NOT NULL
+    WHERE consensus_adp IS NOT NULL AND format = '1qb'
 ),
 predicted AS (
     SELECT

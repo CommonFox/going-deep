@@ -179,6 +179,7 @@ adp AS (
     FROM adp_consensus a
     JOIN career_appearances c ON c.player_id = a.gsis_id
     WHERE a.consensus_adp IS NOT NULL
+        AND a.format = '1qb'
         AND a.position IN {_SKILL_POSITIONS}
         AND a.season <= (SELECT MAX(season) FROM weekly_stats)
 )

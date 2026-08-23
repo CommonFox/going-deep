@@ -342,7 +342,8 @@ LEFT JOIN players pl ON pl.gsis_id = r.player_id
 LEFT JOIN offensive_line_grades ol ON ol.team = w.team AND ol.season = r.season - 1
 LEFT JOIN skill_position_grades sk
     ON sk.team = w.team AND sk.season = r.season - 1 AND sk.position = r.position
-LEFT JOIN adp_consensus adp ON adp.gsis_id = r.player_id AND adp.season = r.season
+LEFT JOIN adp_consensus adp
+    ON adp.gsis_id = r.player_id AND adp.season = r.season AND adp.format = '1qb'
 LEFT JOIN actual_scoring o ON o.player_id = r.player_id AND o.target_season = r.season
 LEFT JOIN actual_availability av
     ON av.player_id = r.player_id AND av.target_season = r.season
@@ -542,7 +543,8 @@ LEFT JOIN prior_role pr ON pr.gsis_id = b.player_id AND pr.season = b.target_sea
 -- As of target_season itself, unlike every other prior-year join here: preseason ADP is published
 -- before the season starts, so lining it up with the season it was drafted for is what makes it a
 -- fair benchmark rather than a lagged one.
-LEFT JOIN adp_consensus adp ON adp.gsis_id = b.player_id AND adp.season = b.target_season
+LEFT JOIN adp_consensus adp
+    ON adp.gsis_id = b.player_id AND adp.season = b.target_season AND adp.format = '1qb'
 LEFT JOIN actual_scoring o ON o.player_id = b.player_id AND o.target_season = b.target_season
 LEFT JOIN actual_availability av
     ON av.player_id = b.player_id AND av.target_season = b.target_season
