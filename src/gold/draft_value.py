@@ -140,7 +140,8 @@ adp AS (
     SELECT a.gsis_id, a.season, a.position, a.player_name, a.consensus_adp
     FROM adp_consensus a
     JOIN career_appearances c ON c.player_id = a.gsis_id
-    WHERE a.consensus_adp IS NOT NULL AND a.position IN {_SKILL_POSITIONS}
+    WHERE a.consensus_adp IS NOT NULL AND a.format = '1qb'
+        AND a.position IN {_SKILL_POSITIONS}
 ),
 leagues AS (SELECT league_key FROM league_settings)
 SELECT
@@ -365,7 +366,7 @@ def build_draft_value() -> None:
     live_adp = con.execute(f"""
         SELECT a.gsis_id AS player_id, a.player_name, a.position, a.consensus_adp
         FROM adp_consensus a
-        WHERE a.season = {live_season} AND a.consensus_adp IS NOT NULL
+        WHERE a.season = {live_season} AND a.consensus_adp IS NOT NULL AND a.format = '1qb'
             AND a.position IN {_SKILL_POSITIONS}
     """).df()
     con.close()

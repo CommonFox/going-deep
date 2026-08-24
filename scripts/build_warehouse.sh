@@ -81,6 +81,12 @@ run src.gold.draft_strategy
 run src.gold.draft_value
 run src.gold.player_archetypes
 
+# Fifth tier — the draft-night tables. draft_board reprices consensus_projections in each league's
+# own scoring and slots for the season about to be played; draft_plan then reads that board to work
+# out who survives to each seat's picks and what opening plan is worth from there.
+run src.gold.draft_board
+run src.gold.draft_plan
+
 echo "── warehouse ─────────────────────────────────────────────"
 # Brief: every table was named as it was written. `python -m src.summary` lists them all.
 python -m src.summary --brief

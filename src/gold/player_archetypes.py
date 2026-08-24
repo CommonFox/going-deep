@@ -176,6 +176,7 @@ live AS (
     FROM adp_consensus a
     CROSS JOIN league_settings l
     WHERE a.season > (SELECT MAX(season) FROM boom_bust)
+        AND a.format = '1qb'
         AND a.consensus_adp IS NOT NULL
         AND a.position IN {_SKILL_POSITIONS}
 ),

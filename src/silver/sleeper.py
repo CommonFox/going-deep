@@ -183,6 +183,15 @@ def fetch_projections(season: int, weeks: list[int]) -> Path:
 
 
 def load_projections(raw_path: Path) -> None:
+    """Load weekly projections, keeping all three scoring flavours and projected receptions.
+
+    Sleeper hands back `pts_std`, `pts_half_ppr` and `pts_ppr` side by side, so a league's own
+    reception value is a column choice rather than a conversion — which matters here because the
+    Sleeper league is half-PPR and every other projection source in this warehouse publishes full
+    PPR. `rec` is kept for the same reason from the other direction: `half = ppr - 0.5 * rec` is an
+    identity, not an approximation (checked against a real row: 5.17 - 0.5 * 1.78 = 4.28 =
+    `pts_half_ppr`), so these receptions are what lets a PPR-only source be restated in half-PPR.
+    """
     data = json.loads(raw_path.read_text())
     rows = [
         {
@@ -194,7 +203,10 @@ def load_projections(raw_path: Path) -> None:
             "team": row.get("team"),
             "season": row.get("season"),
             "week": row.get("week"),
+            "pts_std": (row.get("stats") or {}).get("pts_std"),
+            "pts_half_ppr": (row.get("stats") or {}).get("pts_half_ppr"),
             "pts_ppr": (row.get("stats") or {}).get("pts_ppr"),
+            "rec": (row.get("stats") or {}).get("rec"),
         }
         for row in data
     ]

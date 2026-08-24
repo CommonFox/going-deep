@@ -85,36 +85,55 @@ def _aggregates(sources: tuple[str, ...]) -> str:
 # none of them appear in any of the active-player projection sources below — but matching on
 # position too costs nothing and rules it out structurally rather than by luck). `ids` labels
 # kickers "PK" where every source here uses "K", so the crosswalk is normalized to "K" first.
-_BUILD_SQL = f"""
-CREATE OR REPLACE TABLE consensus_projections AS
-WITH ids_normalized AS (
-    SELECT gsis_id, name, espn_id, sleeper_id, cbs_id, merge_name,
-           CASE WHEN position = 'PK' THEN 'K' ELSE position END AS position
-    FROM ids
-),
--- The season the other four sources actually represent (sleeper_projections.season is text,
--- everyone else's is already numeric) — see module docstring for why inhouse_projections is
--- matched against this instead of its own MAX(target_season).
-current_season AS (
-    SELECT MAX(season) AS season FROM (
-        SELECT MAX(season) AS season FROM espn_projections
-        UNION ALL
-        SELECT MAX(TRY_CAST(season AS BIGINT)) AS season FROM sleeper_projections
-        UNION ALL
-        SELECT MAX(season) AS season FROM cbs_projections
-        UNION ALL
-        SELECT MAX(season) AS season FROM fftoday_projections
-    )
-),
-source_projections AS (
+# Each source's expression for one scoring basis. Half-PPR is not a second opinion here, it is the
+# same projection restated, and every source is reconciled to it exactly rather than approximately:
+# Sleeper and FFToday publish half-PPR directly, CBS's half-PPR page 404s but `(standard + ppr) / 2`
+# is an identity at half a point per reception, and ESPN and inhouse publish PPR only, so they are
+# converted with `ppr - 0.5 * rec` against Sleeper's own projected receptions (an identity too, not
+# an estimate — see sleeper.load_projections).
+#
+# Quarterbacks and kickers take a structural zero for receptions. A pass-catcher with no Sleeper
+# reception projection (9 players as of 2026, all deep-roster) yields NULL instead, so the converted
+# arms drop out of the half-PPR blend via the NOT NULL filter below rather than quietly reporting a
+# PPR number as half-PPR.
+_SCORINGS = ("ppr", "half_ppr")
+
+_RECEPTIONS_ADJUSTMENT = """0.5 * CASE WHEN {position} IN ('QB', 'K') THEN 0 ELSE receptions.rec END"""
+
+
+def _source_arm(scoring: str) -> str:
+    """The `source_projections` UNION for one scoring basis, tagged with that basis."""
+    if scoring == "ppr":
+        espn_points = "e.projected_points"
+        sleeper_points = "SUM(s.pts_ppr)"
+        cbs_from = "cbs_projections c"
+        cbs_where = "WHERE c.scoring = 'ppr'"
+        fftoday_where = "WHERE f.scoring = 'ppr'"
+        inhouse_points = "projected_points_full"
+    else:
+        espn_points = (
+            "e.projected_points - "
+            + _RECEPTIONS_ADJUSTMENT.format(position="ids.position")
+        )
+        sleeper_points = "SUM(s.pts_half_ppr)"
+        cbs_from = "cbs_half c"
+        cbs_where = ""
+        fftoday_where = "WHERE f.scoring = 'half_ppr'"
+        inhouse_points = (
+            "projected_points_full - "
+            + _RECEPTIONS_ADJUSTMENT.format(position="inhouse_projections.position")
+        )
+
+    return f"""
     SELECT ids.gsis_id, ids.name AS player_name, ids.position, 'espn' AS source,
-           e.projected_points
+           '{scoring}' AS scoring, {espn_points} AS projected_points
     FROM espn_projections e
     JOIN ids_normalized ids ON ids.espn_id = e.espn_id AND ids.position = e.position
+    LEFT JOIN receptions ON receptions.gsis_id = ids.gsis_id
 
     UNION ALL
 
-    SELECT ids.gsis_id, ids.name, ids.position, 'sleeper', SUM(s.pts_ppr)
+    SELECT ids.gsis_id, ids.name, ids.position, 'sleeper', '{scoring}', {sleeper_points}
     FROM sleeper_projections s
     JOIN ids_normalized ids
         ON TRY_CAST(s.sleeper_id AS DOUBLE) = ids.sleeper_id AND ids.position = s.position
@@ -122,17 +141,17 @@ source_projections AS (
 
     UNION ALL
 
-    SELECT ids.gsis_id, ids.name, ids.position, 'cbs', c.projected_points
-    FROM cbs_projections c
+    SELECT ids.gsis_id, ids.name, ids.position, 'cbs', '{scoring}', c.projected_points
+    FROM {cbs_from}
     JOIN ids_normalized ids ON ids.cbs_id = c.cbs_id AND ids.position = c.position
-    WHERE c.scoring = 'ppr'
+    {cbs_where}
 
     UNION ALL
 
-    SELECT ids.gsis_id, ids.name, ids.position, 'fftoday', f.projected_points
+    SELECT ids.gsis_id, ids.name, ids.position, 'fftoday', '{scoring}', f.projected_points
     FROM fftoday_projections f
     JOIN ids_normalized ids ON ids.merge_name = f.merge_name AND ids.position = f.position
-    WHERE f.scoring = 'ppr'
+    {fftoday_where}
 
     UNION ALL
 
@@ -145,12 +164,60 @@ source_projections AS (
     -- projected_points_full, not projected_points: the external sources all publish a
     -- health-neutral full-season number (see module docstring), so blending in inhouse's
     -- availability-discounted one would be a units mismatch, not a difference of opinion.
-    SELECT player_id, player_name, position, 'inhouse', projected_points_full
+    SELECT player_id, player_name, position, 'inhouse', '{scoring}', {inhouse_points}
     FROM inhouse_projections
+    LEFT JOIN receptions ON receptions.gsis_id = inhouse_projections.player_id
     WHERE target_season = (SELECT season FROM current_season)
+"""
+
+
+# Every join also matches on position, since the `ids` crosswalk has a handful of duplicate
+# external IDs among long-retired/free-agent players (verified harmless against current data —
+# none of them appear in any of the active-player projection sources below — but matching on
+# position too costs nothing and rules it out structurally rather than by luck). `ids` labels
+# kickers "PK" where every source here uses "K", so the crosswalk is normalized to "K" first.
+_BUILD_SQL = f"""
+CREATE OR REPLACE TABLE consensus_projections AS
+WITH ids_normalized AS (
+    SELECT gsis_id, name, espn_id, sleeper_id, cbs_id, merge_name,
+           CASE WHEN position = 'PK' THEN 'K' ELSE position END AS position
+    FROM ids
+),
+current_season AS (
+    SELECT MAX(season) AS season FROM (
+        SELECT MAX(season) AS season FROM espn_projections
+        UNION ALL
+        SELECT MAX(TRY_CAST(season AS BIGINT)) AS season FROM sleeper_projections
+        UNION ALL
+        SELECT MAX(season) AS season FROM cbs_projections
+        UNION ALL
+        SELECT MAX(season) AS season FROM fftoday_projections
+    )
+),
+-- Sleeper's projected receptions, the conversion factor for the PPR-only sources. Deliberately
+-- unfiltered by season, matching the sleeper arm's own SUM() below, since the projections archive
+-- holds one season at a time.
+receptions AS (
+    SELECT ids.gsis_id, SUM(s.rec) AS rec
+    FROM sleeper_projections s
+    JOIN ids_normalized ids
+        ON TRY_CAST(s.sleeper_id AS DOUBLE) = ids.sleeper_id AND ids.position = s.position
+    GROUP BY ids.gsis_id
+),
+-- CBS publishes standard and PPR but not half-PPR; the midpoint of the two is exactly half-PPR.
+cbs_half AS (
+    SELECT cbs_id, position,
+           (MAX(projected_points) FILTER (WHERE scoring = 'standard')
+            + MAX(projected_points) FILTER (WHERE scoring = 'ppr')) / 2 AS projected_points
+    FROM cbs_projections
+    GROUP BY cbs_id, position
+),
+source_projections AS (
+{"    UNION ALL".join(_source_arm(scoring) for scoring in _SCORINGS)}
 )
 SELECT
     gsis_id,
+    scoring,
     ANY_VALUE(player_name) AS player_name,
     ANY_VALUE(position) AS position,
     {_aggregates(_SOURCES)}
@@ -158,7 +225,7 @@ FROM source_projections
 WHERE gsis_id IS NOT NULL
     AND projected_points IS NOT NULL
     AND position IN {_SKILL_POSITIONS}
-GROUP BY gsis_id
+GROUP BY gsis_id, scoring
 """
 
 # `team` values are normalized (via the normalize_team Python UDF registered below) before this
