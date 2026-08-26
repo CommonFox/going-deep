@@ -60,6 +60,26 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
   model, add it under `src/gold/`. Follow the same fetch/load split and folder layout rather than
   inventing a new pattern.
 
+## Testing
+
+Tests are written **before** the code they test, never after. A test written once the
+implementation exists describes whatever that implementation happens to do — it passes by
+construction and checks nothing. Concretely:
+
+- Enumerate and agree the full set of test cases before implementation starts. Exact output
+  formatting can be filled in later; the ideation behind the cases cannot.
+- Never edit an assertion so a failing test passes, and never delete a failing test to get a suite
+  green. When a test fails, the default assumption is that the code is wrong.
+- A test genuinely can be wrong or unnecessary. That is a conversation to have out loud — say
+  which test, why it's wrong, and let the decision be made explicitly. Never resolve it silently by
+  rewriting the assertion.
+- Test external behaviour, not internals. A test that asserts how a function does its work has to
+  be rewritten every time the work changes, which trains everyone to edit tests to make them pass.
+
+Most of this repo is warehouse-to-warehouse SQL, verified by row counts printed through
+`src/console.py` rather than by a test suite, and that stays true. Tests are for the modules whose
+logic is pure enough to check in isolation.
+
 ## Working style
 
 Implement changes directly — write and run the code yourself rather than coaching the user through
