@@ -105,6 +105,7 @@ import pandas as pd
 
 from src import console
 from src.gold.points_over_replacement import _SKILL_POSITIONS, _build_league_season
+from src.gold.sleeper_ids import report_unmapped, resolve_sleeper_ids
 from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -129,7 +130,8 @@ _STARTER_WEEKS_FOR_ROLE = 4
 _SCORING_BASES = {1.0: "ppr", 0.5: "half_ppr"}
 
 _OUTPUT_COLUMNS = [
-    "league_key", "season", "format", "scoring", "player_id", "player_name", "position", "team",
+    "league_key", "season", "format", "scoring", "player_id", "sleeper_id", "player_name",
+    "position", "team",
     "ol_grade", "ol_tier",
     "projected_points", "projected_points_adjusted", "projected_floor", "projected_ceiling",
     "availability", "availability_source",
@@ -343,6 +345,19 @@ def _adp(con: duckdb.DuckDBPyConnection, season: int, adp_format: str) -> pd.Dat
     return pd.concat([players, defenses], ignore_index=True)
 
 
+def _sleeper_crosswalk(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """nflverse's player crosswalk, cut to the Sleeper mapping — see `sleeper_ids` for why this
+    and not Sleeper's own `gsis_id` field, which is null for most of the board."""
+    return con.execute(
+        "SELECT gsis_id, sleeper_id FROM ids WHERE gsis_id IS NOT NULL AND sleeper_id IS NOT NULL"
+    ).df()
+
+
+def _sleeper_defenses(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """Sleeper's own DEF rows, which key a defense on its team rather than on any player ID."""
+    return con.execute("SELECT player_id FROM sleeper_players WHERE position = 'DEF'").df()
+
+
 def _team_context(con: duckdb.DuckDBPyConnection, season: int) -> pd.DataFrame:
     """Each player's team and the line he runs behind, graded before the season starts.
 
@@ -416,6 +431,12 @@ def _build_league(con: duckdb.DuckDBPyConnection, league: pd.Series, season: int
     df["season"] = season
     df["format"] = adp_format
     df["scoring"] = scoring
+
+    # Resolved per league, not once for the whole board: a player holds one row per league, so a
+    # board-wide uniqueness check would report every player as colliding with himself.
+    df = resolve_sleeper_ids(df, _sleeper_crosswalk(con), _sleeper_defenses(con))
+    report_unmapped(df, league["league_key"])
+
     return df[_OUTPUT_COLUMNS].sort_values("points_over_replacement", ascending=False)
 
 
