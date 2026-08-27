@@ -61,12 +61,16 @@ from src.silver.teams import normalize_team
 # Every entry below is the same story — a rookie who has a crosswalk row and a Sleeper row, but
 # whose `ids.sleeper_id` nflverse has not filled in yet. Expect to prune these as the crosswalk
 # catches up; the build will tell you when one no longer matches anybody.
+#
+# Deliberately only the draftable ones. Three more rookie kickers (Drew Stevens, Charlie Smyth,
+# Ben Sauls) have the identical gap and were left out on purpose: they sit below the draftable
+# cut, so mapping them buys nothing a draft can use, while each entry is one more thing that
+# fails the build once the player leaves the board. If one of them wins a job, he crosses the cut
+# and the build will name him — which is the signal to add him, rather than carrying him against
+# the possibility.
 SLEEPER_ID_OVERRIDES = {
     "00-0041145": ("13833", "Dominic Zvada"),
     "00-0040899": ("13545", "Trey Smack"),
-    "00-0041182": ("13968", "Drew Stevens"),
-    "00-0039229": ("11653", "Charlie Smyth"),
-    "00-0040530": ("13066", "Ben Sauls"),
 }
 
 

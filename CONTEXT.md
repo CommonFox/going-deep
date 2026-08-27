@@ -72,6 +72,13 @@ Every draftable player for one league, priced in that league's scoring basis and
 you read on draft night.
 _Avoid_: rankings, cheat sheet, big board
 
+**Draftable**:
+Priced by the market (has a **consensus ADP**) *or* ranked inside the league's starter depth at
+the position. The second arm is not redundant: a rookie can have no ADP at all and still be the
+5th kicker on a board where 14 get rostered, and an ADP-only rule would drop him. Below this cut
+sit third-string quarterbacks and camp-body kickers, whom a build counts rather than names.
+_Avoid_: rosterable, relevant, in range
+
 **ADP**:
 Average draft position — the mean pick at which a player actually went, across many real drafts in
 a stated format. A market price, never a projection or an opinion.
