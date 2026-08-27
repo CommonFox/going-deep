@@ -62,6 +62,18 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
 
 ## Testing
 
+The suite is pytest, configured in `pytest.ini` and living in `tests/`. Run it from the repo root
+with `.venv` activated:
+
+```bash
+pytest
+```
+
+`tests/conftest.py` makes any attempt to open a DuckDB file raise, for every test, without opting
+in — a test holding a connection would lock the warehouse and make a concurrent
+`scripts/build_warehouse.sh` fail with an error that never mentions tests. Fixtures are small
+hand-written frames, not warehouse extracts.
+
 Tests are written **before** the code they test, never after. A test written once the
 implementation exists describes whatever that implementation happens to do — it passes by
 construction and checks nothing. Concretely:

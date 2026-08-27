@@ -7,6 +7,7 @@ duckdb==1.5.5
 fastparquet==2026.5.0
 fsspec==2026.7.0
 idna==3.18
+iniconfig==2.3.0
 joblib==1.5.3
 narwhals==2.24.0
 nfl_data_py==0.3.3
@@ -14,6 +15,8 @@ numpy==1.26.4
 packaging==26.3
 pandas==1.5.3
 pathlib==1.0.1
+pluggy==1.6.0
+pytest==9.1.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 pytz==2026.3.post1

@@ -418,6 +418,28 @@ Query the warehouse with the DuckDB CLI or Python:
 python -c "import duckdb; print(duckdb.connect('data/warehouse.duckdb').sql('SHOW TABLES'))"
 ```
 
+## Testing
+
+```bash
+pytest
+```
+
+Run from the repo root, with `.venv` activated. Configuration is in `pytest.ini`; tests live in
+`tests/`.
+
+Most of this repo is warehouse-to-warehouse SQL, verified by the row counts each module prints
+through `src/console.py`. Tests are for the modules whose logic is pure enough to check in
+isolation — currently the team normalizer and the live-draft work built on top of it.
+
+The suite never opens the warehouse. `tests/conftest.py` makes any attempt to open a DuckDB file
+raise, for every test, without opting in. This is the same file-lock problem `src/query.py`
+describes for notebooks: a connection held open during a test run makes a concurrent
+`build_warehouse.sh` fail with `Could not set lock on file`, an error that names the warehouse and
+never mentions tests. Fixtures are small hand-written frames instead, whose expected values can be
+worked out by hand and do not shift under a rebuild.
+
+Tests are written **before** the code they test — see `CLAUDE.md` for the rule and why.
+
 ## Notebooks (`notebooks/`)
 
 Findings worth keeping, written as live queries so re-running updates them instead of leaving them
