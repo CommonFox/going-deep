@@ -1,11 +1,43 @@
-"""Render the live draft board once, from the terminal, and exit.
+"""Keep the live draft board current from the terminal, until it is interrupted.
 
     python -m src.draft.live
     python -m src.draft.live --limit 50
+    python -m src.draft.live --once
 
-The first thing here that can be pointed at a real draft. It resolves my seat from the draft
-order, reads the picks made so far, subtracts them from the board the warehouse built days ago,
-and prints what is left. Then it stops — refreshing as picks come in is the next ticket.
+It resolves my seat from the draft order, reads the picks made so far, subtracts them from the
+board the warehouse built days ago, and prints what is left — then does that again every few
+seconds for the length of the draft, redrawing only when the picks have actually changed. What
+counts as a change, and what the live line under the board says, are both in `refresh`.
+
+## The screen appends, and the status line does not
+
+A changed board is drawn *below* the last one rather than over a cleared screen, so the whole
+draft stays in scrollback: what the board looked like at pick 14 is worth being able to scroll
+back to at pick 40, and a tool that clears itself every three seconds has thrown that away. The
+thing that would make an appending screen unreadable is the status line, which changes every tick
+and says almost nothing new — so it is written with a carriage return and no newline of its own,
+and each tick writes over the last one rather than under it. Boards are the only thing that
+accumulates.
+
+## Why the loop's four effects are handed in
+
+`poll`, `sleep`, `now` and `write` are parameters with the real ones as defaults. A loop is the
+one shape of code here that cannot be checked by reading it — whether it redraws too often,
+whether it survives a dropped poll, whether it ends cleanly — and none of those questions should
+have to be answered by pointing the tool at a real draft, which happens once a year.
+
+## What is read once, and what is read on a tick
+
+The board, the survival frame, the draft record and my seat are read once, before the loop: they
+were computed by a rebuild days ago or drawn before the first pick, and nothing on the night
+changes them. That is not only saved work — re-opening the warehouse every three seconds for two
+hours would hold its file lock against any rebuild for the length of the draft. Only the picks are
+fetched on a tick.
+
+The staleness refusal is likewise once, at startup. A warehouse that ages past the limit *during*
+a draft would otherwise shut the tool down at pick 60, which is far worse than a board a couple of
+hours older than the rule prefers. That decision is taken before the draft, deliberately, and is
+not revisited under a pick clock.
 
 ## This module is the edge, and the only part of `src/draft/` that is
 
@@ -15,9 +47,10 @@ write anything" is a question answered by reading one module rather than four.
 
 What it touches, exhaustively:
 
-- Four HTTP **GET**s to Sleeper — the user, the league's drafts, the draft, the picks. There is no
-  POST anywhere in this package, which is what "never makes a pick" means in practice: the tool
-  has no code path that could submit one, rather than a flag saying it shouldn't.
+- HTTP **GET**s to Sleeper — the user, the league's drafts and the draft once each, then the
+  picks on every tick. There is no POST anywhere in this package, which is what "never makes a
+  pick" means in practice: the tool has no code path that could submit one, rather than a flag
+  saying it shouldn't.
 - Two reads of `data/warehouse.duckdb` through `src.query.q`, which opens read-only and closes
   before each returns. A draft-night process cannot corrupt what the pipeline built, and cannot
   hold the file lock against a rebuild either.
@@ -43,12 +76,14 @@ is a screen being drawn.
 """
 
 import argparse
+import time
 from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
 
-from src.draft.picks import ingest_picks
+from src.draft.picks import ingest_picks, picks_made
+from src.draft.refresh import fingerprint, status_line
 from src.draft.render import render_board
 from src.draft.seat import resolve_seat
 from src.draft.waiting import rank_by_cost_of_waiting
@@ -74,8 +109,13 @@ MAX_WAREHOUSE_AGE = timedelta(hours=24)
 DEFAULT_LIMIT = 30
 
 # A draft night has a pick clock. A request that hangs is worse than one that fails, because a
-# failure can be retried by pressing up-enter and a hang cannot be anything.
+# failure is reported and retried on the next tick and a hang is a screen that has stopped.
 TIMEOUT_SECONDS = 10
+
+# How often to look. A Sleeper pick takes a manager tens of seconds at best, so a few seconds is
+# already faster than the draft can move; the cost of going faster is a rate limit in the middle
+# of a draft, and the cost of going slower is advice priced against a board that has moved on.
+REFRESH_SECONDS = 3.0
 
 
 def _get(path: str):
@@ -194,46 +234,160 @@ def load_survival(league_key: str = LEAGUE_KEY) -> pd.DataFrame:
     return survival
 
 
-def render_once(limit: int = DEFAULT_LIMIT) -> str:
-    """Everything, once: fetch, resolve, subtract, rank, and give back the screen."""
-    board = load_board()
-    survival = load_survival()
+def prepare() -> dict:
+    """Everything that cannot change once the draft is under way, read once.
+
+    The board and the survival frame were computed by a rebuild days ago; the draft record and the
+    seat were settled when the order was drawn. Nothing on the night moves any of them, so the
+    loop above carries this rather than re-reading it — see the module docstring on the file lock.
+    """
     draft = find_draft(LEAGUE_ID, SEASON)
-    league = resolve_seat(draft, user_id(USERNAME))
-    result = ingest_picks(_get(f"/draft/{draft['draft_id']}/picks"), board, league)
-    ranked = rank_by_cost_of_waiting(board, survival, result)
+    return {
+        "board": load_board(),
+        "survival": load_survival(),
+        "draft": draft,
+        "league": resolve_seat(draft, user_id(USERNAME)),
+    }
+
+
+def fetch_picks(context: dict) -> list[dict]:
+    """The one thing that changes: every pick made so far, the whole draft, every poll."""
+    return _get(f"/draft/{context['draft']['draft_id']}/picks")
+
+
+def screen(context: dict, picks: list[dict], limit: int = DEFAULT_LIMIT) -> str:
+    """One picks payload against the frozen half, drawn — subtract, rank, render.
+
+    Pure given the context, which is what lets the loop be driven over hand-written payloads
+    without a network or a warehouse behind it.
+    """
+    result = ingest_picks(picks, context["board"], context["league"])
+    ranked = rank_by_cost_of_waiting(context["board"], context["survival"], result)
 
     # The bye week is joined back on by ID rather than carried through the ranking: what the
     # ranking returns is a fixed contract, and a display column is not the ranking's business.
     # Joining on `player_id` is the same identity the whole feature runs on.
     candidates = ranked["candidates"].merge(
-        board[["player_id", "bye_week"]], on="player_id", how="left"
+        context["board"][["player_id", "bye_week"]], on="player_id", how="left"
     )
     return render_board(
-        candidates, result, league, limit,
+        candidates, result, context["league"], limit,
         degraded=ranked["degraded"], covers_to=ranked["covers_to"],
     )
 
 
-def main(limit: int = DEFAULT_LIMIT) -> None:
+def render_once(limit: int = DEFAULT_LIMIT) -> str:
+    """Everything, once: fetch, resolve, subtract, rank, and give back the screen."""
+    context = prepare()
+    return screen(context, fetch_picks(context), limit)
+
+
+def _write(text: str) -> None:
+    """Straight at the terminal, unbuffered, adding no newline of its own.
+
+    The loop decides where lines end, because the status line deliberately does not end: it is
+    written over on the next tick rather than under.
+    """
+    print(text, end="", flush=True)
+
+
+def _rule(made: int) -> str:
+    """The line between one board and the next, naming the pick that brought the new one."""
+    return f"── pick {made} " + "─" * 48
+
+
+def watch(
+    context: dict,
+    limit: int = DEFAULT_LIMIT,
+    poll=None,
+    sleep=time.sleep,
+    now=datetime.now,
+    write=_write,
+    interval: float = REFRESH_SECONDS,
+) -> None:
+    """Draw the board, then keep it current until interrupted.
+
+    `context` is what `prepare` returned. The four effects default to the real ones and are
+    parameters so the loop can be driven without a clock, a network or a terminal.
+
+    A poll that fails is a line on the screen and nothing more: it is reported with the time of
+    the last check that did work, and the next tick asks again. Nothing short of Ctrl-C ends this,
+    because a session that ends at pick eleven is a session nobody restarts in time.
+    """
+    poll = poll or (lambda: fetch_picks(context))
+
+    drawn = None        # the fingerprint of the board currently on screen
+    checked_at = None   # when a poll last succeeded, which is what the status line reports
+    made = 0
+    status_width = 0    # how much of the last status line there is to write over
+
+    try:
+        while True:
+            # Read once per tick, so the time on screen is the time of the check it describes.
+            moment = now()
+            error = None
+            try:
+                payload = poll()
+            except requests.RequestException as failure:
+                error = failure
+            else:
+                checked_at = moment
+                made = picks_made(payload)
+                mark = fingerprint(payload)
+                if mark != drawn:
+                    # End whatever status line is sitting on the terminal before drawing past it.
+                    lead = "\n" if drawn is None else f"\n{_rule(made)}\n"
+                    write(f"{lead}\n{screen(context, payload, limit)}\n")
+                    drawn = mark
+                    status_width = 0
+
+            line = status_line(made, checked_at, moment, error)
+            # Padded to the last line's width: a shorter line written over a longer one otherwise
+            # leaves the tail of the old one behind, which reads as part of the new one.
+            write("\r" + line + " " * max(status_width - len(line), 0))
+            status_width = len(line)
+
+            sleep(interval)
+    except KeyboardInterrupt:
+        write(f"\n\nstopped at {made} picks made — no pick was ever submitted\n")
+
+
+def main(limit: int = DEFAULT_LIMIT, once: bool = False) -> None:
     built_at = warehouse_built_at()
     check_recency(built_at, datetime.now())
-    print(render_once(limit))
-    print(f"\nboard built {built_at:%Y-%m-%d %H:%M} — read-only, no pick is ever submitted")
+    built = f"board built {built_at:%Y-%m-%d %H:%M} — read-only, no pick is ever submitted"
+
+    if once:
+        print(render_once(limit))
+        print(f"\n{built}")
+        return
+
+    context = prepare()
+    print(f"{built}\nrefreshing every {REFRESH_SECONDS:.0f}s — Ctrl-C to stop")
+    watch(context, limit)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Show what is still on the board in the live Sleeper draft."
+        description="Keep what is still on the board in the live Sleeper draft on screen."
     )
     parser.add_argument(
         "--limit", type=int, default=DEFAULT_LIMIT,
         help=f"how many candidates to show (default {DEFAULT_LIMIT})",
     )
+    parser.add_argument(
+        "--once", action="store_true",
+        help="draw the board once and exit, instead of refreshing until interrupted",
+    )
     arguments = parser.parse_args()
 
     try:
-        main(arguments.limit)
+        main(arguments.limit, arguments.once)
+    except KeyboardInterrupt:
+        # Ctrl-C before the loop starts — during the warehouse read or the first fetch. The loop
+        # has its own, which stops cleanly rather than unwinding.
+        print("\nstopped before the board was drawn\n")
+        raise SystemExit(0)
     except RuntimeError as error:
         # A stale or missing warehouse is a thing the drafter has to fix, not a bug — a traceback
         # in front of a pick clock buries the one sentence that says what to do.
