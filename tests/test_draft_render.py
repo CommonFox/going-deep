@@ -69,6 +69,7 @@ def ingested(**overrides) -> dict:
         "roster": roster(("QB", 1, []), ("RB", 2, []), ("SUPER_FLEX", 1, [])),
         "unmatched": [],
         "next_pick": 29,
+        "pick_after_next": 56,
         "picks_made": 28,
         **overrides,
     }
@@ -184,7 +185,11 @@ def test_a_clean_draft_shows_no_warning():
 
 # 16. A finished draft says so instead of printing `None` for the next pick.
 def test_a_finished_draft_says_so_rather_than_printing_none():
-    out = render_board(candidates({}), ingested(next_pick=None, picks_made=210), LEAGUE)
+    out = render_board(
+        candidates({}),
+        ingested(next_pick=None, pick_after_next=None, picks_made=210),
+        LEAGUE,
+    )
     header = out.splitlines()[0]
     assert "None" not in header
     assert "complete" in header.lower()
@@ -265,8 +270,11 @@ def test_a_candidate_shows_his_survival_probability_and_what_waiting_costs():
 
 def test_the_probabilities_are_anchored_to_a_named_pick():
     """A bare percentage means nothing without the pick it is a probability of reaching."""
-    out = render_board(candidates({}), ingested(next_pick=56, picks_made=29), LEAGUE)
+    out = render_board(
+        candidates({}), ingested(next_pick=29, pick_after_next=56, picks_made=28), LEAGUE
+    )
     heading = next(line for line in out.splitlines() if line.startswith("Best available"))
+    # The turn after the one being decided, which is what a passed-over player has to survive to.
     assert "#56" in heading
     assert "cost of waiting" in heading
 
@@ -312,7 +320,7 @@ def test_a_degraded_result_says_it_has_fallen_back_to_value_ranking():
     out = render_board(
         candidates({"player_name": "Best Left", "p_survives": None, "cost_of_waiting": None,
                     "survival_known": False}),
-        ingested(next_pick=196, picks_made=195),
+        ingested(next_pick=195, pick_after_next=196, picks_made=194),
         LEAGUE,
         degraded=True,
         covers_to=180,

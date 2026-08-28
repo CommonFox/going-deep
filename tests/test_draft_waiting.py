@@ -5,23 +5,29 @@ set of picks — never how it gets there. Fixtures are a handful of players with
 probabilities chosen so the expected number can be worked out on paper, which is the only kind of
 expectation that survives a rebuild of the warehouse those inputs really come from.
 
-## The one thing worth reading before the cases
+## The two pick numbers, which are the whole of these cases
+
+Cost of waiting prices a decision at one pick against a fallback at another. The seat has both:
+`next_pick` is the turn being decided, `pick_after_next` is the turn a player passed on has to
+survive to. Seat 1 of 14 deciding pick 1 is waiting until 28; deciding 28 he is waiting until 29,
+which is the immediately following selection and therefore no wait at all.
 
 `draft_availability` holds an **unconditional** probability: P(this player's draft position lands
 at or after pick k), computed days ago from his ADP distribution. That is not the number a drafter
-wants. He is looking at a board on which the player is *demonstrably still there*, so the question
-is P(survives to my next pick **given** he is here now).
-
-Availability is a monotone event — once a player is gone he stays gone — so that conditional is an
+wants, because it counts every pick from the top of the draft — including his own, and including
+the ones already made. Availability is a monotone event, so the conditional he does want is an
 exact ratio of two numbers the table already holds, not a new model:
 
-    p_survives = p(next pick) / p(the pick about to be made)
+    p_survives = p(pick after next) / p(next pick + 1)
 
-Case 20 is the case that pins this down. On the clock with back-to-back picks, the two picks are
-the same pick, the ratio is 1, and cost of waiting is zero for everybody — which is the whole point
-of user story 8: at the turn the tool must stop urging a reach when both players can simply be
-taken. Read against the raw unconditional number instead, De'Von Achane shows a 12% survival
-probability and a large cost of waiting at the exact moment the drafter is already on the clock.
+The denominator starts one past the pick being decided, because that pick is *mine* and I am the
+one passing: my own turn cannot be part of the hazard a player has to survive.
+
+Case 20 is the case that pins this down. At the turn the two picks are adjacent, numerator and
+denominator are the same pick, the ratio is one, and cost of waiting is zero for everybody — user
+story 8, that the tool stop urging a reach when both players can simply be taken. Read off the raw
+column instead, De'Von Achane shows a 9% survival probability and a large cost of waiting from a
+seat that is about to pick twice in a row.
 
 ## Vocabulary
 
@@ -37,12 +43,12 @@ import pytest
 from src.draft.candidates import CANDIDATE_COLUMNS
 from src.draft.waiting import WAITING_COLUMNS, rank_by_cost_of_waiting
 
-# The pick about to be made is `picks_made + 1`, and the conditional ratio's denominator is read
-# there. Most cases below sit a seat mid-round: 29 picks gone, pick 30 on the clock, my next turn
-# at 56. Cases that need the turn set them equal instead.
-PICKS_MADE = 29
-NOW = PICKS_MADE + 1
-NEXT_PICK = 56
+# Seat 1 of 14 picks 1, 28, 29, 56, 57. Most cases below have it deciding pick 29 and waiting
+# until 56, so the gap it has to survive opens at pick 30. Cases about the turn use 28 and 29
+# instead, where that gap is empty.
+NEXT_PICK = 29
+WAIT_TO = 56
+GAP_STARTS = NEXT_PICK + 1
 
 
 def board(*rows: dict) -> pd.DataFrame:
@@ -96,7 +102,8 @@ def picks(**overrides) -> dict:
         "roster": pd.DataFrame(),
         "unmatched": [],
         "next_pick": NEXT_PICK,
-        "picks_made": PICKS_MADE,
+        "pick_after_next": WAIT_TO,
+        "picks_made": NEXT_PICK - 1,
         **overrides,
     }
 
@@ -116,19 +123,19 @@ def row_for(result: dict, name: str) -> pd.Series:
 # 20. At the turn, where the next pick is the immediately following selection, every survival
 #     probability is at its maximum and cost of waiting is therefore near zero for all candidates.
 def test_at_the_turn_nothing_costs_anything_to_wait_for():
-    # Seat 1 in a 14-team snake picks 28 and 29 back to back. On the clock at 28 with 27 gone,
-    # the pick about to be made *is* my next pick, so there is no gap to survive.
+    # Seat 1 in a 14-team snake picks 28 and 29 back to back. Deciding 28, the turn a passed-over
+    # player must survive to is 29 — the immediately following selection, so there is no gap.
     result = rank_by_cost_of_waiting(
         board(
             player("00-0000001", "Fragile Back", 118.8),
             player("00-0000002", "Likely Back", 93.7),
             player("00-0000003", "Safe Receiver", 85.3, position="WR"),
         ),
-        # Real numbers off the sleeper board at pick 28. Unconditionally the first of these is 88%
-        # gone; conditional on him sitting in front of me right now he is certain to last a gap of
-        # no picks at all. A ranking built on the raw column fails here, which is the point.
-        survival(*at(28, ("00-0000001", 0.122), ("00-0000002", 0.562), ("00-0000003", 0.934))),
-        picks(picks_made=27, next_pick=28),
+        # Real numbers off the sleeper board at pick 29. Unconditionally the first of these is 91%
+        # gone; conditional on his surviving the picks *other* people make in between — of which
+        # there are none — he is certain. A ranking built on the raw column fails here.
+        survival(*at(29, ("00-0000001", 0.086), ("00-0000002", 0.500), ("00-0000003", 0.917))),
+        picks(next_pick=28, pick_after_next=29, picks_made=27),
     )
 
     assert list(result["candidates"]["p_survives"]) == [1.0, 1.0, 1.0]
@@ -143,8 +150,8 @@ def test_a_gap_of_real_picks_does_cost_something():
         player("00-0000002", "Likely Back", 93.7),
     )
     frame = survival(
-        *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0)),
-        *at(NEXT_PICK, ("00-0000001", 0.1), ("00-0000002", 0.9)),
+        *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+        *at(WAIT_TO, ("00-0000001", 0.1), ("00-0000002", 0.9)),
     )
 
     result = rank_by_cost_of_waiting(the_board, frame, picks())
@@ -166,9 +173,9 @@ def test_of_two_equally_valuable_players_the_one_less_likely_to_last_ranks_highe
             player("00-0000004", "Backup Tight End", 50.0, position="TE"),
         ),
         survival(
-            *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0),
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0),
                      ("00-0000003", 1.0), ("00-0000004", 1.0)),
-            *at(NEXT_PICK, ("00-0000001", 0.2), ("00-0000002", 1.0),
+            *at(WAIT_TO, ("00-0000001", 0.2), ("00-0000002", 1.0),
                            ("00-0000003", 0.8), ("00-0000004", 1.0)),
         ),
         picks(),
@@ -197,8 +204,8 @@ def test_of_two_players_costing_the_same_to_wait_for_the_more_valuable_ranks_hig
             player("00-0000002", "Greater Receiver", 200.0, position="WR"),
         ),
         survival(
-            *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0)),
-            *at(NEXT_PICK, ("00-0000001", 0.5), ("00-0000002", 0.75)),
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 0.5), ("00-0000002", 0.75)),
         ),
         picks(),
     )
@@ -216,8 +223,8 @@ def test_a_player_with_no_survival_data_is_ranked_by_value_and_flagged():
         player("00-0000002", "Mid Back", 60.0),
     ]
     frame = survival(
-        *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0)),
-        *at(NEXT_PICK, ("00-0000001", 0.5), ("00-0000002", 1.0)),
+        *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+        *at(WAIT_TO, ("00-0000001", 0.5), ("00-0000002", 1.0)),
     )
     # Two of them, so "ranked by value" is an ordering that can be checked rather than a position
     # of one. The rookie outvalues everyone on the board and still cannot be given a cost.
@@ -258,7 +265,7 @@ def test_a_pick_past_the_survival_model_degrades_to_value_ranking():
             *at(168, ("00-0000001", 0.9), ("00-0000002", 0.8), ("00-0000003", 0.7)),
             *at(180, ("00-0000001", 0.5), ("00-0000002", 0.4), ("00-0000003", 0.3)),
         ),
-        picks(picks_made=195, next_pick=196),
+        picks(next_pick=195, pick_after_next=196, picks_made=194),
     )
 
     assert result["degraded"] is True
@@ -273,17 +280,17 @@ def test_a_pick_past_the_survival_model_degrades_to_value_ranking():
 # list leaves implicit, and the two judgement calls the spec did not reach.
 
 
-def test_the_probability_is_anchored_to_the_stated_next_pick():
-    """Change the pick, change the number: nothing here is a per-player constant."""
+def test_the_probability_is_anchored_to_the_pick_it_waits_to():
+    """Change the pick waited to, change the number: nothing here is a per-player constant."""
     the_board = board(player("00-0000001", "A Back", 100.0))
     frame = survival(
-        *at(NOW, ("00-0000001", 1.0)),
+        *at(GAP_STARTS, ("00-0000001", 1.0)),
         *at(40, ("00-0000001", 0.8)),
-        *at(NEXT_PICK, ("00-0000001", 0.3)),
+        *at(WAIT_TO, ("00-0000001", 0.3)),
     )
 
-    near = rank_by_cost_of_waiting(the_board, frame, picks(next_pick=40))
-    far = rank_by_cost_of_waiting(the_board, frame, picks(next_pick=NEXT_PICK))
+    near = rank_by_cost_of_waiting(the_board, frame, picks(pick_after_next=40))
+    far = rank_by_cost_of_waiting(the_board, frame, picks(pick_after_next=WAIT_TO))
 
     assert row_for(near, "A Back")["p_survives"] == pytest.approx(0.8)
     assert row_for(far, "A Back")["p_survives"] == pytest.approx(0.3)
@@ -305,9 +312,9 @@ def test_a_cliff_costs_more_to_wait_on_than_a_deep_position():
             player("00-0000004", "Deep Backup", 90.0, position="RB"),
         ),
         survival(
-            *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0),
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0),
                      ("00-0000003", 1.0), ("00-0000004", 1.0)),
-            *at(NEXT_PICK, ("00-0000001", 0.5), ("00-0000002", 1.0),
+            *at(WAIT_TO, ("00-0000001", 0.5), ("00-0000002", 1.0),
                            ("00-0000003", 0.5), ("00-0000004", 1.0)),
         ),
         picks(),
@@ -331,10 +338,10 @@ def test_a_player_the_table_drops_at_my_pick_is_gone_rather_than_unknown():
             player("00-0000002", "Next Back", 40.0),
         ),
         survival(
-            *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
             # No row for the faller at my pick; the other player still has one, so the frame
             # covers that pick and the absence is about him rather than about the table.
-            *at(NEXT_PICK, ("00-0000002", 1.0)),
+            *at(WAIT_TO, ("00-0000002", 1.0)),
         ),
         picks(),
     )
@@ -360,8 +367,8 @@ def test_a_player_the_table_already_had_gone_gets_no_probability_at_all():
         ),
         survival(
             ("00-0000001", 1, 1.0),
-            *at(NOW, ("00-0000002", 1.0)),
-            *at(NEXT_PICK, ("00-0000002", 0.5)),
+            *at(GAP_STARTS, ("00-0000002", 1.0)),
+            *at(WAIT_TO, ("00-0000002", 0.5)),
         ),
         picks(),
     )
@@ -379,11 +386,27 @@ def test_a_finished_draft_degrades_rather_than_raising():
             player("00-0000001", "Best Left", 40.0),
             player("00-0000002", "Second Left", 30.0, position="WR"),
         ),
-        survival(*at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0))),
-        picks(next_pick=None, picks_made=210),
+        survival(*at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0))),
+        picks(next_pick=None, pick_after_next=None, picks_made=210),
     )
 
     assert result["degraded"] is True
+    assert names(result) == ["Best Left", "Second Left"]
+
+
+def test_the_last_round_has_nothing_to_wait_for_either():
+    """A seat's final pick has no later turn, so there is no gap and no cost to price."""
+    result = rank_by_cost_of_waiting(
+        board(
+            player("00-0000001", "Best Left", 40.0),
+            player("00-0000002", "Second Left", 30.0, position="WR"),
+        ),
+        survival(*at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0))),
+        picks(next_pick=197, pick_after_next=None, picks_made=196),
+    )
+
+    assert result["degraded"] is True
+    assert result["candidates"]["cost_of_waiting"].isna().all()
     assert names(result) == ["Best Left", "Second Left"]
 
 
@@ -395,7 +418,7 @@ def test_a_fully_drafted_board_returns_no_candidates_without_raising():
 
     result = rank_by_cost_of_waiting(
         the_board,
-        survival(*at(NEXT_PICK, ("00-0000001", 0.5), ("00-0000002", 0.5))),
+        survival(*at(WAIT_TO, ("00-0000001", 0.5), ("00-0000002", 0.5))),
         picks(taken={"00-0000001", "00-0000002"}),
     )
 
@@ -412,8 +435,8 @@ def test_a_taken_player_never_appears_among_the_candidates():
             player("00-0000002", "Free Back", 120.0),
         ),
         survival(
-            *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0)),
-            *at(NEXT_PICK, ("00-0000001", 0.5), ("00-0000002", 0.5)),
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 0.5), ("00-0000002", 0.5)),
         ),
         picks(taken={"00-0000001"}),
     )
@@ -434,8 +457,8 @@ def test_points_over_replacement_comes_back_exactly_as_the_board_priced_it():
             player("00-0000002", "Below Replacement", -12.5, position="WR"),
         ),
         survival(
-            *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0)),
-            *at(NEXT_PICK, ("00-0000001", 0.5), ("00-0000002", 0.5)),
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 0.5), ("00-0000002", 0.5)),
         ),
         picks(),
     )
@@ -458,8 +481,8 @@ def test_filtering_to_one_position_leaves_every_cost_of_waiting_unchanged():
         player("00-0000003", "A Back", 200.0),
     )
     frame = survival(
-        *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0), ("00-0000003", 1.0)),
-        *at(NEXT_PICK, ("00-0000001", 0.2), ("00-0000002", 0.9), ("00-0000003", 0.4)),
+        *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0), ("00-0000003", 1.0)),
+        *at(WAIT_TO, ("00-0000001", 0.2), ("00-0000002", 0.9), ("00-0000003", 0.4)),
     )
 
     everyone = rank_by_cost_of_waiting(the_board, frame, picks())
@@ -479,8 +502,8 @@ def test_the_inputs_are_left_exactly_as_they_were_handed_in():
         player("00-0000002", "A Receiver", 120.0, position="WR"),
     )
     frame = survival(
-        *at(NOW, ("00-0000001", 1.0), ("00-0000002", 1.0)),
-        *at(NEXT_PICK, ("00-0000001", 0.5), ("00-0000002", 0.5)),
+        *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+        *at(WAIT_TO, ("00-0000001", 0.5), ("00-0000002", 0.5)),
     )
     board_before = the_board.copy(deep=True)
     frame_before = frame.copy(deep=True)
@@ -497,16 +520,18 @@ def test_the_inputs_are_left_exactly_as_they_were_handed_in():
 
 
 def test_a_probability_is_never_read_off_the_wrong_pick():
-    """The denominator is the pick about to be made, not the last one completed.
+    """The denominator starts one past my own turn, not at it.
 
-    An off-by-one here is invisible: every number stays in range and the ordering barely moves,
-    which is the worst shape a draft-night error can have.
+    The pick being decided is mine, and I am the one passing, so it cannot be part of the hazard a
+    player has to survive — counting it would charge me for the chance that I take him myself. An
+    off-by-one here is invisible: every number stays in range and the ordering barely moves, which
+    is the worst shape a draft-night error can have.
     """
     the_board = board(player("00-0000001", "A Back", 100.0))
     frame = survival(
-        ("00-0000001", PICKS_MADE, 0.5),
-        ("00-0000001", NOW, 0.4),
-        ("00-0000001", NEXT_PICK, 0.2),
+        ("00-0000001", NEXT_PICK, 0.5),
+        ("00-0000001", GAP_STARTS, 0.4),
+        ("00-0000001", WAIT_TO, 0.2),
     )
 
     result = rank_by_cost_of_waiting(the_board, frame, picks())
@@ -524,8 +549,8 @@ def test_a_probability_never_comes_back_above_one_or_below_zero():
         ),
         survival(
             # A ratio a hair over one, which floating point reaches on its own.
-            *at(NOW, ("00-0000001", 0.3), ("00-0000002", 1.0)),
-            *at(NEXT_PICK, ("00-0000001", 0.30000000000000004), ("00-0000002", 0.0)),
+            *at(GAP_STARTS, ("00-0000001", 0.3), ("00-0000002", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 0.30000000000000004), ("00-0000002", 0.0)),
         ),
         picks(),
     )

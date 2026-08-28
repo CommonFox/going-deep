@@ -305,3 +305,25 @@ def test_a_hand_marked_player_does_not_advance_the_draft():
     # read as pick 33 — nine away — at the exact moment the drafter is on the clock at pick 24.
     assert result["picks_made"] == 23
     assert result["next_pick"] == 24
+
+
+# The two cases below belong to issue #37, which needs the turn *after* the one being decided:
+# whatever is passed on at `next_pick` has to survive until then, and the gap between the two is
+# the thing cost of waiting prices.
+def test_the_pick_after_next_is_the_seats_following_turn():
+    # Seat 1 of 14 picks 1, 28, 29, 56. Deciding pick 1, the gap to survive runs to 28.
+    assert ingest_picks([], board(), league(seat=1))["pick_after_next"] == 28
+
+    # And at the turn the two are adjacent, which is what makes waiting free there.
+    # Distinct IDs, because deduplication is on the player: one repeated ID is one pick.
+    through_27 = [pick(str(n), n) for n in range(1, 28)]
+    result = ingest_picks(through_27, board(), league(seat=1))
+    assert (result["next_pick"], result["pick_after_next"]) == (28, 29)
+
+
+def test_there_is_no_pick_after_the_seats_last_one():
+    # Nothing can be waited for from the final round: there is no later turn to wait until.
+    through_the_last_gap = [pick(str(n), n) for n in range(1, 197)]
+    result = ingest_picks(through_the_last_gap, board(), league(seat=1))
+    assert result["next_pick"] == 197
+    assert result["pick_after_next"] is None
