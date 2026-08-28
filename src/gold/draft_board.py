@@ -131,7 +131,7 @@ _SCORING_BASES = {1.0: "ppr", 0.5: "half_ppr"}
 
 _OUTPUT_COLUMNS = [
     "league_key", "season", "format", "scoring", "player_id", "sleeper_id", "player_name",
-    "position", "team",
+    "position", "team", "bye_week",
     "ol_grade", "ol_tier",
     "projected_points", "projected_points_adjusted", "projected_floor", "projected_ceiling",
     "availability", "availability_source",
@@ -402,6 +402,104 @@ def _team_context(con: duckdb.DuckDBPyConnection, season: int) -> pd.DataFrame:
     return df[["player_id", "team", "ol_grade", "ol_tier"]]
 
 
+def _schedule(con: duckdb.DuckDBPyConnection, season: int) -> pd.DataFrame:
+    """Every regular-season game of one season, which is the only thing a bye week is readable from."""
+    return con.execute(
+        "SELECT week, home_team, away_team FROM schedules WHERE season = ? AND game_type = 'REG'",
+        [season],
+    ).df()
+
+
+def _canonical_team(team) -> str | None:
+    """One team abbreviation folded to canonical, or None where a row has no team to fold."""
+    if not isinstance(team, str) or not team.strip():
+        return None
+    return normalize_team(team)
+
+
+def bye_weeks(schedule: pd.DataFrame) -> pd.DataFrame:
+    """One row per team: the week of the season in which it has no game.
+
+    Takes a frame of `week`, `home_team` and `away_team` and reads both sides, because a team that
+    happens to be away every week it plays is still a team. Abbreviations come back canonical, so
+    the caller joins against one spelling rather than the several the sources use.
+
+    Raises where any team's answer is not exactly one week. Two byes means games are missing from
+    the frame; none means games are duplicated in it. Either way the season handed in is not a real
+    one, and a bye week is worth exactly as much as the schedule it was read from — so this stops
+    rather than picking a week, which is the failure mode that would put a wrong number on a board
+    nobody would think to re-check.
+    """
+    weeks = sorted(set(schedule["week"]))
+
+    played: dict[str, set] = {}
+    for side in ("home_team", "away_team"):
+        for team, week in zip(schedule[side], schedule["week"]):
+            played.setdefault(normalize_team(team), set()).add(week)
+
+    byes = {
+        team: [week for week in weeks if week not in weeks_played]
+        for team, weeks_played in played.items()
+    }
+
+    broken = {team: found for team, found in byes.items() if len(found) != 1}
+    if broken:
+        raise ValueError(
+            "The schedule does not give every team exactly one bye week: "
+            + "; ".join(
+                f"{team} plays every week"
+                if not found
+                else f"{team} is missing weeks {', '.join(str(week) for week in found)}"
+                for team, found in sorted(broken.items())
+            )
+            + ". That means the schedule is incomplete, so no bye week read from it can be trusted."
+        )
+
+    return pd.DataFrame(
+        [{"team": team, "bye_week": found[0]} for team, found in sorted(byes.items())]
+    )
+
+
+def add_bye_weeks(board: pd.DataFrame, schedule: pd.DataFrame) -> pd.DataFrame:
+    """The board with each player's bye week beside his team, as a copy.
+
+    A bye week is a property of a *team*, so it joins team-to-team and no name matching happens
+    anywhere. `fantasypros_adp` and `ffc_adp` both publish a `bye` column and both are the wrong
+    source: they are keyed on player names, and FantasyPros' own is missing for 5-20% of recent
+    rows, so taking a team fact through a name would be strictly worse than reading the schedule.
+
+    Both sides are folded to canonical abbreviations first. That is not a formality — the board
+    genuinely holds two spellings of Arizona at once, AZ for the players it reads from `rosters`
+    and ARI for the defense it reads from Sleeper.
+
+    A player whose team is unknown, or whose team the schedule does not cover, gets a null rather
+    than a guess. There is no sensible default for a bye week and a wrong one would quietly pile a
+    drafter's starters into the same empty week.
+    """
+    byes = bye_weeks(schedule)
+    by_team = dict(zip(byes["team"], byes["bye_week"]))
+
+    board = board.copy()
+    board["bye_week"] = pd.to_numeric(
+        board["team"].map(_canonical_team).map(by_team)
+    ).astype("Int64")
+    return board
+
+
+def _report_missing_byes(board: pd.DataFrame, league_key: str) -> None:
+    """Count the rows the schedule could not date, so a gap is a build line rather than a surprise.
+
+    Deliberately not `@console.analysis`, for the same reason `report_unmapped` isn't: a quiet
+    build is still the last place this can be noticed before a draft.
+    """
+    missing = int(board["bye_week"].isna().sum())
+    if missing:
+        console.note(
+            f"{league_key}: no bye week for {missing} rows — no team, or a team the schedule "
+            "does not cover"
+        )
+
+
 def _build_league(con: duckdb.DuckDBPyConnection, league: pd.Series, season: int) -> pd.DataFrame:
     scoring = _scoring_basis(league)
     adp_format = _league_format(league)
@@ -432,6 +530,8 @@ def _build_league(con: duckdb.DuckDBPyConnection, league: pd.Series, season: int
     df["ol_tier"] = df["ol_tier"].where(df["position"] == "RB")
     # Defenses are keyed on their own team abbreviation, so they name themselves.
     df["team"] = df["team"].fillna(df["player_id"].where(df["position"] == "DST"))
+    df = add_bye_weeks(df, _schedule(con, season))
+    _report_missing_byes(df, league["league_key"])
     df["league_key"] = league["league_key"]
     df["season"] = season
     df["format"] = adp_format
