@@ -254,3 +254,54 @@ def test_the_roster_is_reported_against_the_leagues_real_starting_slots():
     ])
 
     pd.testing.assert_frame_equal(result["roster"], expected)
+
+
+# The two cases below are not from the ticket's numbered list. They were agreed in conversation
+# after the implementation, because the payload defences above exist for a situation Sleeper's own
+# API cannot create: it refuses to draft an already-drafted player, so a duplicate never arrives
+# from the network. Both duplicates and unnumbered picks arrive from #36's hand-marking, where the
+# drafter's own entry is unioned into the same list the API returns. Without these, the two rules
+# that handle that are untested for the reason they were written.
+
+
+# A hand-marked entry carries no pick number: the drafter knows the player is gone, not when.
+HAND_MARKED = {"player_id": "4034", "roster_id": MY_ROSTER, "pick_no": None, "metadata": {}}
+
+ONE_BACK = {"player_id": "00-0000001", "sleeper_id": "4034", "player_name": "My Back"}
+
+
+# A. A hand-marked player and his own API pick are one player.
+#
+# Two claims, because the two ways of getting this wrong fail in opposite directions and a test
+# making only one of them would sleep through the other. Keying identity on the pick number drops
+# the hand-mark, because its number is None — the player silently returns to the board after the
+# drafter has said he is gone. Not deduplicating at all keeps both copies, and he fills two slots.
+def test_a_hand_marked_player_is_taken_before_the_api_reports_him():
+    result = ingest_picks([HAND_MARKED], board(ONE_BACK), league())
+
+    assert result["taken"] == {"00-0000001"}
+    assert players_in(result["roster"], "RB") == ["My Back"]
+
+
+def test_a_hand_marked_player_and_his_api_pick_are_one_player():
+    from_the_api = pick("4034", pick_no=12, roster_id=MY_ROSTER)
+
+    result = ingest_picks([HAND_MARKED, from_the_api], board(ONE_BACK), league())
+
+    # Two RB slots, so a player counted twice would fill both and report the position as done.
+    assert players_in(result["roster"], "RB") == ["My Back"]
+    assert result["roster"].loc[result["roster"]["slot"] == "RB", "open"].iloc[0] == 1
+
+
+# B. A hand-marked player does not advance the draft.
+def test_a_hand_marked_player_does_not_advance_the_draft():
+    api = [pick(str(9000 + n), pick_no=n) for n in range(1, 24)]
+    hand_marked = {"player_id": "4034", "roster_id": ANOTHER_ROSTER, "pick_no": None,
+                   "metadata": {}}
+
+    result = ingest_picks([*api, hand_marked], board(), league(seat=5))
+
+    # 23 selections have happened. Counting the list would make it 24, and seat 5's turn would
+    # read as pick 33 — nine away — at the exact moment the drafter is on the clock at pick 24.
+    assert result["picks_made"] == 23
+    assert result["next_pick"] == 24
