@@ -412,6 +412,17 @@ sequence:
 ./scripts/build_warehouse.sh
 ```
 
+On draft night, render the Sleeper board once and exit:
+
+```bash
+python -m src.draft.live              # the top 30 still available
+python -m src.draft.live --limit 50
+```
+
+It resolves the seat from the draft order, subtracts the picks already made, and shows the roster
+so far and the next overall pick number. It reads the warehouse read-only, refuses to run against
+a build more than a day old, and has no code path that could submit a pick.
+
 Query the warehouse with the DuckDB CLI or Python:
 
 ```bash
