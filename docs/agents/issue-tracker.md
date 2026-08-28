@@ -5,13 +5,39 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
-- **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
+- **Read an issue**: `gh api repos/<owner>/<repo>/issues/<number> --jq '{number, title, state, labels: [.labels[].name], body}'`, and `gh api repos/<owner>/<repo>/issues/<number>/comments --jq '.[].body'` for the comments. **Not** `gh issue view` — see *Known breakage* below.
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
+
+## Known breakage: `gh issue view`
+
+`gh issue view` fails every time against this repo:
+
+```
+GraphQL: Projects (classic) is being deprecated in favor of the new Projects experience
+(repository.issue.projectCards)
+```
+
+This is neither a network error nor a permissions problem. The installed `gh` (2.25.1, March 2023)
+still requests the `projectCards` field, which GitHub has since removed, so the query is rejected
+server-side and no amount of retrying helps.
+
+It is the only affected subcommand. `gh issue list`, `gh issue create`, `gh issue comment`,
+`gh issue edit`, `gh issue close`, `gh pr *` and `gh api` all work.
+
+Two ways out, in order of preference:
+
+- **Upgrade `gh`.** Current versions no longer ask for the field, after which `gh issue view` works
+  and this section can go.
+- **Until then, read issues through `gh api`**, as under *Read an issue* above.
+
+Unrelated, but worth knowing before misdiagnosing the above: `error connecting to api.github.com`
+occurs intermittently from any `gh` command on this machine and clears on a retry. A failure that
+survives a retry is real; one that does not, is not.
 
 ## Pull requests as a triage surface
 
@@ -23,7 +49,7 @@ When set to `yes`, PRs run through the same labels and states as issues, using t
 - **List external PRs for triage**: `gh pr list --state open --json number,title,body,labels,author,authorAssociation,comments` then keep only `authorAssociation` of `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR`, or `NONE` (drop `OWNER`/`MEMBER`/`COLLABORATOR`).
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
-GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
+GitHub shares one number space across issues and PRs, so a bare `#42` may be either: resolve with `gh pr view 42` and fall back to reading the issue via `gh api`.
 
 ## When a skill says "publish to the issue tracker"
 
@@ -31,7 +57,7 @@ Create a GitHub issue.
 
 ## When a skill says "fetch the relevant ticket"
 
-Run `gh issue view <number> --comments`.
+Read it with `gh api` as under *Read an issue* above, not `gh issue view`.
 
 ## Wayfinding operations
 
