@@ -32,6 +32,12 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
       alone.
   - `src/gold/<model>.py` — proprietary/derived models built on top of already-loaded silver
     tables (e.g. `consensus.py`). Pure SQL/Python over the warehouse — no fetch step, no network.
+  - `src/draft/` — the live draft assistant, and the one part of `src/` that is not a medallion
+    layer. It is neither: it opens no connection and reads no raw file, but takes already-built
+    frames and a live API payload and returns frames. Everything about a player's value is fixed
+    by the warehouse rebuild days beforehand; nothing here recomputes any of it. New modules for
+    this feature go here rather than under `gold/`, which is documented as warehouse-to-warehouse
+    and would be a lie about what these do.
 - `if __name__ == "__main__":` in each source module runs the full fetch→load sequence for that
   source end to end.
 - Console output goes through `src/console.py`, never a bare `print`:
