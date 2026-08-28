@@ -110,7 +110,7 @@ def _picked_name(entry: dict) -> str | None:
     return " ".join(part for part in parts if part) or None
 
 
-def _picks_made(picks: list[dict]) -> int:
+def picks_made(picks: list[dict]) -> int:
     """How far the draft has actually got, read from pick numbers rather than list length.
 
     A hand-marked player is a pick that happened but has no number; counting the list would
@@ -233,9 +233,9 @@ def ingest_picks(picks: list[dict], board: pd.DataFrame, league: dict) -> dict:
         if entry.get("roster_id") == league["roster_id"]:
             mine.append(row)
 
-    picks_made = _picks_made(ordered)
+    made = picks_made(ordered)
     next_pick = next_pick_number(
-        picks_made, league["seat"], league["team_count"], league["rounds"]
+        made, league["seat"], league["team_count"], league["rounds"]
     )
     return {
         "taken": taken,
@@ -251,5 +251,5 @@ def ingest_picks(picks: list[dict], board: pd.DataFrame, league: dict) -> dict:
                 next_pick, league["seat"], league["team_count"], league["rounds"]
             )
         ),
-        "picks_made": picks_made,
+        "picks_made": made,
     }
