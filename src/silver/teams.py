@@ -22,7 +22,7 @@ NICKNAME_TO_ABBR = {
 ABBR_ALIASES = {
     "LAR": "LA", "JAC": "JAX", "WSH": "WAS", "GNB": "GB", "NOR": "NO",
     "SFO": "SF", "TAM": "TB", "NWE": "NE", "KAN": "KC", "LVR": "LV",
-    "ARZ": "ARI", "BLT": "BAL", "CLV": "CLE", "HST": "HOU",
+    "ARZ": "ARI", "AZ": "ARI", "BLT": "BAL", "CLV": "CLE", "HST": "HOU",
     # Relocations, mapped to the franchise's current abbreviation so a team joins to itself across
     # its move: a 2018 "OAK" row is the same O-line/roster lineage as a 2024 "LV" one. Sources
     # disagree about which era's code to use for old seasons (PFR's advstats_pass says "OAK" for
