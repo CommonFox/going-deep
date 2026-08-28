@@ -21,9 +21,27 @@ how often it is read, which puts the candidate list at the bottom where the eye 
 
 A player with no bye week gets a dash. Pandas renders a missing nullable integer as `<NA>` and a
 missing float as `nan`, and either one in a column of week numbers reads as a number that happens
-to look odd rather than as an absence. The same rule applies to a missing team. Nothing here
-substitutes a plausible value for a missing one — a guessed bye week would quietly pile a
+to look odd rather than as an absence. The same rule applies to a missing team, and to a player
+the survival model does not cover: no probability rather than a confident-looking zero. Nothing
+here substitutes a plausible value for a missing one — a guessed bye week would quietly pile a
 drafter's starters into the same empty week, which is worse than an obvious blank.
+
+## The screen has to say which rule it ranked by
+
+`rank_by_cost_of_waiting` falls back to points over replacement on its own, past the point the
+survival model covers, and the rows look identical either way. So the heading names the rule and
+the pick the probabilities are anchored to, and a fallback says on screen how far past the model
+the draft has got. A drafter who cannot tell the two rankings apart is reading a number he has no
+way to judge.
+
+Both numbers stay on the row beside the value they were computed from, for the same reason the
+repo keeps a blended metric's inputs individually visible: a ranking is auditable or it is obeyed.
+
+## Vocabulary
+
+*Survives* and *survival probability*, never *availability* — the glossary spends that word on how
+much of a season a player can play, and two meanings under one word on a screen read against a
+pick clock is how a supply number gets read as an injury number.
 """
 
 import pandas as pd
@@ -49,6 +67,24 @@ def _bye(value) -> str:
     if value is None or pd.isna(value):
         return _MISSING
     return str(int(value))
+
+
+def _percent(value) -> str:
+    """A survival probability, rounded to where it can actually be read.
+
+    Whole percent, because the third decimal place of a tail probability is not a thing anyone
+    should be deciding a pick on and a wider column costs a name its space.
+    """
+    if value is None or pd.isna(value):
+        return _MISSING
+    return f"{value * 100:.0f}%"
+
+
+def _cost(value) -> str:
+    """Cost of waiting, in the same units and to the same precision as the value beside it."""
+    if value is None or pd.isna(value):
+        return _MISSING
+    return f"{value:.1f}"
 
 
 def _header(picks: dict, league: dict) -> str:
@@ -99,13 +135,44 @@ def _roster(roster: pd.DataFrame, league: dict) -> list[str]:
     return lines
 
 
-def _candidates(candidates: pd.DataFrame, limit: int) -> list[str]:
-    """The board that is left, best first, cut to what fits on a screen."""
+def _ranking(picks: dict, degraded: bool, covers_to: int | None) -> list[str]:
+    """How the list below was ordered, and — when it is not the good rule — why not.
+
+    The pick named is `pick_after_next`, not the turn being decided: waiting means still being
+    there at the turn *after* this one, and a probability anchored to the pick in hand would be a
+    certainty dressed up as a forecast.
+    """
+    wait_to = picks["pick_after_next"]
+    if not degraded and wait_to is not None:
+        return [
+            f", ranked by cost of waiting to pick #{wait_to}",
+            "  SURV — survival probability, the chance he survives to that pick;"
+            " COST — what waiting gives up",
+        ]
+
+    heading = ", ranked by points over replacement"
+    if wait_to is None:
+        return [heading, "  no turn after this one, so there is nothing to wait for"]
+    if covers_to is None:
+        return [heading, "  no survival data was supplied, so nothing can be priced for waiting"]
+    return [
+        heading,
+        f"  pick #{wait_to} is past #{covers_to}, the last the survival model covers",
+    ]
+
+
+def _candidates(
+    candidates: pd.DataFrame, picks: dict, limit: int, degraded: bool, covers_to: int | None
+) -> list[str]:
+    """The board that is left, most expensive to pass on first, cut to what fits on a screen."""
     shown = candidates.head(limit)
+    rule, note = _ranking(picks, degraded, covers_to)
     lines = [
         "",
-        f"Best available — {len(shown)} of {len(candidates)}",
-        f"  {'#':>3}  {'POS':<5}{'PLAYER':<{_NAME_WIDTH}}{'TM':<5}{'BYE':>3}{'PoR':>9}",
+        f"Best available — {len(shown)} of {len(candidates)}{rule}",
+        note,
+        f"  {'#':>3}  {'POS':<5}{'PLAYER':<{_NAME_WIDTH}}{'TM':<5}{'BYE':>3}{'PoR':>9}"
+        f"{'SURV':>7}{'COST':>9}",
     ]
     if shown.empty:
         lines.append("  nobody left on the board")
@@ -116,22 +183,32 @@ def _candidates(candidates: pd.DataFrame, limit: int) -> list[str]:
             f"  {rank:>3}  {_text(row.position):<5}{_text(row.player_name):<{_NAME_WIDTH}}"
             f"{_text(row.team):<5}{_bye(row.bye_week):>3}"
             f"{row.points_over_replacement:>9.1f}"
+            f"{_percent(row.p_survives):>7}{_cost(row.cost_of_waiting):>9}"
         )
     return lines
 
 
 def render_board(
-    candidates: pd.DataFrame, picks: dict, league: dict, limit: int = 30
+    candidates: pd.DataFrame,
+    picks: dict,
+    league: dict,
+    limit: int = 30,
+    degraded: bool = False,
+    covers_to: int | None = None,
 ) -> str:
     """The whole screen as one string.
 
-    `candidates` is what `rank_candidates` returned with the board's `bye_week` joined on,
+    `candidates` is what `rank_by_cost_of_waiting` returned with the board's `bye_week` joined on,
     `picks` is what `ingest_picks` returned, and `league` is the shape `resolve_seat` read out
     of the draft record. `limit` is how much of the board to show; the count above the table
     always names the total, so a cut list never reads as a short one.
+
+    `degraded` and `covers_to` are the rest of what the ranking returned. They are separate
+    arguments rather than a dict because they change the words above the table and nothing else,
+    and a renderer that had to be handed a ranking result could not be pointed at anything else.
     """
     lines = [_header(picks, league)]
     lines += _unmatched(picks["unmatched"])
     lines += _roster(picks["roster"], league)
-    lines += _candidates(candidates, limit)
+    lines += _candidates(candidates, picks, limit, degraded, covers_to)
     return "\n".join(lines)

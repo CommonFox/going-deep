@@ -41,6 +41,12 @@ describes — and a version that forgot the reversal would give 1, 15, 29 and be
 onwards. Picks made is read from the highest pick number seen rather than from the length of the
 list, so a hand-marked player (no pick number) cannot push the next turn a pick further away.
 
+Two of the seat's picks are reported, not one. `next_pick` is the turn being decided; the whole
+point of `pick_after_next` is the gap between them, which is what a player has to survive to still
+be there if he is passed on. At the turn those two are adjacent and the gap is empty, which is
+seat 1 being able to take both players at 28 and 29; from the middle of the board the same pair is
+14 picks apart. One number cannot say that, which is why both are returned.
+
 ## Filling slots
 
 A quarterback can start at QB or in the superflex; a back can start at RB, in the flex, or in the
@@ -190,6 +196,9 @@ def ingest_picks(picks: list[dict], board: pd.DataFrame, league: dict) -> dict:
     - `roster` — my lineup so far, a frame of one row per starting slot.
     - `unmatched` — every pick whose player the board could not identify, named, in draft order.
     - `next_pick` — the overall number of my next turn, or None once the draft is over.
+    - `pick_after_next` — the turn after that, or None when my next turn is my last. This is what
+      a player passed on at `next_pick` has to survive to, so it is the pick cost of waiting is
+      measured against.
     - `picks_made` — how far the draft has got, so a caller need not re-parse the payload for it.
     """
     ordered = _unique_picks(picks)
@@ -225,12 +234,22 @@ def ingest_picks(picks: list[dict], board: pd.DataFrame, league: dict) -> dict:
             mine.append(row)
 
     picks_made = _picks_made(ordered)
+    next_pick = next_pick_number(
+        picks_made, league["seat"], league["team_count"], league["rounds"]
+    )
     return {
         "taken": taken,
         "roster": _roster_frame(_assign_to_slots(mine, league["slots"]), league["slots"]),
         "unmatched": unmatched,
-        "next_pick": next_pick_number(
-            picks_made, league["seat"], league["team_count"], league["rounds"]
+        "next_pick": next_pick,
+        # The same walk, started from my next turn rather than from the draft: whatever I pass on
+        # there has to last until this one.
+        "pick_after_next": (
+            None
+            if next_pick is None
+            else next_pick_number(
+                next_pick, league["seat"], league["team_count"], league["rounds"]
+            )
         ),
         "picks_made": picks_made,
     }

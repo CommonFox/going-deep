@@ -18,9 +18,9 @@ What it touches, exhaustively:
 - Four HTTP **GET**s to Sleeper — the user, the league's drafts, the draft, the picks. There is no
   POST anywhere in this package, which is what "never makes a pick" means in practice: the tool
   has no code path that could submit one, rather than a flag saying it shouldn't.
-- One read of `data/warehouse.duckdb` through `src.query.q`, which opens read-only and closes
-  before it returns. A draft-night process cannot corrupt what the pipeline built, and cannot hold
-  the file lock against a rebuild either.
+- Two reads of `data/warehouse.duckdb` through `src.query.q`, which opens read-only and closes
+  before each returns. A draft-night process cannot corrupt what the pipeline built, and cannot
+  hold the file lock against a rebuild either.
 
 ## Nothing is typed in
 
@@ -48,10 +48,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
-from src.draft.candidates import rank_candidates
 from src.draft.picks import ingest_picks
 from src.draft.render import render_board
 from src.draft.seat import resolve_seat
+from src.draft.waiting import rank_by_cost_of_waiting
 from src.query import WAREHOUSE_PATH, q
 from src.silver.sleeper import LEAGUE_ID, SEASON
 
@@ -163,20 +163,56 @@ def load_board(league_key: str = LEAGUE_KEY) -> pd.DataFrame:
     return board
 
 
+def load_survival(league_key: str = LEAGUE_KEY) -> pd.DataFrame:
+    """How likely each player is to still be there at each pick, as built days ago.
+
+    `draft_availability` is keyed by seat as well as by pick, but the probability itself is not:
+    it is a tail of the player's own ADP distribution and depends only on the overall pick number,
+    so the same (player, pick) pair carries the same number under every seat. `DISTINCT` collapses
+    that, and the frame then covers *every* overall pick rather than only this seat's — which the
+    conditional needs, because its denominator is read at the pick about to be made and that pick
+    usually belongs to somebody else.
+
+    The rename happens here, at the one place that touches the warehouse, so nothing above this
+    line has to know that the table spells it with the word the glossary has already spent.
+    """
+    survival = q(
+        """
+        SELECT DISTINCT player_id, overall_pick, p_available AS p_survives
+        FROM draft_availability
+        WHERE league_key = ?
+        """,
+        [league_key],
+    )
+    if survival.empty:
+        # Not a refusal: the board is still worth reading, and the ranking says on screen that it
+        # has fallen back to value alone. A draft is not worth losing to a missing table.
+        print(
+            f"\ndraft_availability holds no rows for league {league_key!r} — ranking by points "
+            "over replacement alone. Run scripts/build_warehouse.sh to price waiting.\n"
+        )
+    return survival
+
+
 def render_once(limit: int = DEFAULT_LIMIT) -> str:
     """Everything, once: fetch, resolve, subtract, rank, and give back the screen."""
     board = load_board()
+    survival = load_survival()
     draft = find_draft(LEAGUE_ID, SEASON)
     league = resolve_seat(draft, user_id(USERNAME))
     result = ingest_picks(_get(f"/draft/{draft['draft_id']}/picks"), board, league)
+    ranked = rank_by_cost_of_waiting(board, survival, result)
 
-    # The bye week is joined back on by ID rather than carried through the ranking: what
-    # `rank_candidates` returns is a fixed contract, and a display column is not the ranking's
-    # business. Joining on `player_id` is the same identity the whole feature runs on.
-    candidates = rank_candidates(board, result["taken"]).merge(
+    # The bye week is joined back on by ID rather than carried through the ranking: what the
+    # ranking returns is a fixed contract, and a display column is not the ranking's business.
+    # Joining on `player_id` is the same identity the whole feature runs on.
+    candidates = ranked["candidates"].merge(
         board[["player_id", "bye_week"]], on="player_id", how="left"
     )
-    return render_board(candidates, result, league, limit)
+    return render_board(
+        candidates, result, league, limit,
+        degraded=ranked["degraded"], covers_to=ranked["covers_to"],
+    )
 
 
 def main(limit: int = DEFAULT_LIMIT) -> None:

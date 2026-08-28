@@ -57,7 +57,8 @@ The share of a season a player is expected to be able to play, measured from his
 being on injured reserve. Distinct from **role**: availability is whether he *can* play, role is
 whether he *would* be played.
 _Avoid_: durability, health, expected games (that is one model's internal estimate, which conflates
-availability with role)
+availability with role), and never for draft supply — that is **survival probability**, which is a
+fact about a draft room rather than about a player
 
 **Role**:
 How much a player would be used if fit — starter, committee back, backup. Already priced into every
@@ -103,3 +104,18 @@ _Avoid_: draft order (that means **seat** ordering, not position ordering)
 The other teams in a simulated draft, and how they behave. A field drafting straight off ADP is the
 friendliest possible room, because the focal team is the only one deviating.
 _Avoid_: opponents, league mates
+
+**Survival probability**:
+How likely a player is to still be undrafted at a given pick. A fact about supply in a draft room,
+and nothing to do with **availability**, which is how much of a season he can play — the word is
+already spent, and the collision is why this term exists. `draft_availability` predates the
+distinction and still carries the older name; nothing a drafter reads does.
+_Avoid_: availability, p_available, still on the board (that is an observation, not a probability)
+
+**Cost of waiting**:
+The points over replacement expected to be lost by passing on a player at one turn and hoping he
+lasts to the seat's next one. Combines his **survival probability** with the drop-off to whoever
+would be left at his position, so a deep position is cheap to wait on even when the individual
+player is likely to go, and a cliff is expensive even when he will probably last. Zero at the
+turn, where the two picks are adjacent and there is no gap to survive.
+_Avoid_: urgency, opportunity cost, need (that is a roster question, not a supply one)
