@@ -368,7 +368,12 @@ def _team_context(con: duckdb.DuckDBPyConnection, season: int) -> pd.DataFrame:
     df = con.execute(
         """
         WITH rostered AS (
-            SELECT player_id, mode(team) AS team FROM rosters WHERE season = ? GROUP BY player_id
+            -- Normalized here rather than raw, because `rosters` does not spell a club the same
+            -- way in every season: 2026 writes Arizona as AZ where 2025 writes ARI, and this
+            -- joins one season's roster to the previous season's grades. Left raw, every Arizona
+            -- player silently loses the offensive-line tier the board exists to warn him with.
+            SELECT player_id, mode(normalize_team(team)) AS team
+            FROM rosters WHERE season = ? GROUP BY player_id
         ),
         -- Cut on the grade's own value, not on row position: ntile() would split the four teams
         -- that share a grade of exactly 66.1 across two different tiers depending on row order,

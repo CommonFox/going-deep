@@ -19,6 +19,13 @@ def test_divergent_abbreviation_folds_to_canonical():
     assert normalize_team("WSH") == "WAS"
 
 
+def test_arizona_folds_to_the_canonical_abbreviation():
+    # The draft board carries both spellings at once: `rosters` writes AZ for every Arizona player
+    # while Sleeper writes ARI for the defense, so without this the same club joins to itself as
+    # two different teams and half of it goes missing.
+    assert normalize_team("AZ") == "ARI"
+
+
 def test_relocated_franchise_folds_to_its_current_abbreviation():
     assert normalize_team("OAK") == "LV"
     assert normalize_team("SD") == "LAC"
