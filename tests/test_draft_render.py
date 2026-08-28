@@ -1,8 +1,8 @@
 """What the drafter actually sees, for a given board and a given set of picks.
 
-Cases 10-17 of the terminal render ticket. `render_board` is pure — frames in, one string out —
-so these assert the screen itself rather than capturing stdout, and none of them reaches into how
-the string is assembled.
+Cases 10-17 of the terminal render ticket, and the cost-of-waiting cases from issue #37.
+`render_board` is pure — frames in, one string out — so these assert the screen itself rather
+than capturing stdout, and none of them reaches into how the string is assembled.
 
 Two things are asserted harder than the rest, because they are the ones that cost a pick:
 
@@ -14,9 +14,9 @@ Two things are asserted harder than the rest, because they are the ones that cos
 
 import pandas as pd
 
-from src.draft.candidates import rank_candidates
 from src.draft.picks import ingest_picks
 from src.draft.render import render_board
+from src.draft.waiting import rank_by_cost_of_waiting
 
 SLOTS = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPER_FLEX": 1, "K": 1, "DST": 1}
 
@@ -31,6 +31,11 @@ def candidates(*rows: dict) -> pd.DataFrame:
         "position": "RB",
         "team": "SF",
         "points_over_replacement": 100.0,
+        # Cost of waiting (issue #37) widened what the ranking hands over. The three columns are
+        # defaulted here rather than asserted, so the cases above stay about what they were about.
+        "p_survives": 0.35,
+        "cost_of_waiting": 42.0,
+        "survival_known": True,
         "bye_week": 9,
     }
     frame = pd.DataFrame(
@@ -217,8 +222,16 @@ def test_the_three_halves_join_on_a_real_payload():
         "player_id": "4034", "roster_id": 6, "pick_no": 1,
         "metadata": {"first_name": "A", "last_name": "Back", "position": "RB"},
     }]
+    survival = pd.DataFrame(
+        [
+            {"player_id": "00-0000001", "overall_pick": 2, "p_survives": 1.0},
+            {"player_id": "00-0000002", "overall_pick": 2, "p_survives": 1.0},
+            {"player_id": "00-0000001", "overall_pick": 28, "p_survives": 0.4},
+            {"player_id": "00-0000002", "overall_pick": 28, "p_survives": 0.6},
+        ]
+    )
     result = ingest_picks(picks, board, LEAGUE)
-    ranked = rank_candidates(board, result["taken"]).merge(
+    ranked = rank_by_cost_of_waiting(board, survival, result)["candidates"].merge(
         board[["player_id", "bye_week"]], on="player_id", how="left"
     )
 
@@ -227,3 +240,87 @@ def test_the_three_halves_join_on_a_real_payload():
     # Drafted, by me: off the board and onto the roster, not both and not neither.
     assert any("A Back" in row for row in section(out, "My roster"))
     assert not any("A Back" in row for row in section(out, "Best available"))
+
+
+# The cases below belong to issue #37, which changed the ranking rule from raw value to cost of
+# waiting. Two numbers joined the candidate row, and the screen now has to say which rule it
+# ranked by — because the tool falls back to value ranking on its own, past the point the survival
+# model covers, and a drafter who cannot see that has no way to know what he is reading.
+
+
+def test_a_candidate_shows_his_survival_probability_and_what_waiting_costs():
+    out = render_board(
+        candidates({"player_name": "Bijan Robinson", "p_survives": 0.34,
+                    "cost_of_waiting": 72.3, "points_over_replacement": 178.4}),
+        ingested(),
+        LEAGUE,
+    )
+    row = line_naming(out, "Bijan Robinson")
+    assert "34%" in row
+    assert "72.3" in row
+    # The value it is traded off against stays on the row: the ranking is auditable or it is
+    # obeyed, and the whole design says auditable.
+    assert "178.4" in row
+
+
+def test_the_probabilities_are_anchored_to_a_named_pick():
+    """A bare percentage means nothing without the pick it is a probability of reaching."""
+    out = render_board(candidates({}), ingested(next_pick=56, picks_made=29), LEAGUE)
+    heading = next(line for line in out.splitlines() if line.startswith("Best available"))
+    assert "#56" in heading
+    assert "cost of waiting" in heading
+
+
+def test_the_screen_says_survives_and_survival_probability():
+    """The vocabulary rule, on the surface it exists to protect."""
+    out = render_board(candidates({}), ingested(), LEAGUE)
+    assert "survives" in out
+    assert "survival probability" in out
+
+
+def test_the_screen_never_says_availability():
+    """The glossary spends that word on how much of a season a player can play.
+
+    Two different meanings under one word, on a screen read under a pick clock, is how a drafter
+    ends up reading a supply number as an injury number.
+    """
+    out = render_board(
+        candidates({"p_survives": 0.34, "cost_of_waiting": 72.3}),
+        ingested(unmatched=[{"sleeper_id": "1", "player_name": "Someone Unknown",
+                             "position": "WR", "pick_no": 14}]),
+        LEAGUE,
+    )
+    assert "availability" not in out.lower()
+
+
+def test_a_candidate_with_no_survival_data_shows_gaps_rather_than_numbers():
+    out = render_board(
+        candidates({"player_name": "Unpriced Rookie", "p_survives": None,
+                    "cost_of_waiting": None, "survival_known": False}),
+        ingested(),
+        LEAGUE,
+    )
+    row = line_naming(out, "Unpriced Rookie")
+    assert "nan" not in row.lower()
+    assert "<NA>" not in row
+    assert "0%" not in row
+    # He is still on the board — a missing number hides him from nobody.
+    assert "Unpriced Rookie" in row
+
+
+def test_a_degraded_result_says_it_has_fallen_back_to_value_ranking():
+    out = render_board(
+        candidates({"player_name": "Best Left", "p_survives": None, "cost_of_waiting": None,
+                    "survival_known": False}),
+        ingested(next_pick=196, picks_made=195),
+        LEAGUE,
+        degraded=True,
+        covers_to=180,
+    )
+    assert "points over replacement" in out
+    # Both numbers named, so the drafter can see how far past the model he is rather than being
+    # told only that something is wrong.
+    assert "#196" in out
+    assert "#180" in out
+    # And it must not still claim to be ranking by a rule it no longer has the inputs for.
+    assert "cost of waiting" not in out
