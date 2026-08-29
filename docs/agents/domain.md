@@ -9,7 +9,8 @@ codebase.
   `format`, `scoring basis` and friends are defined there precisely because they are used loosely
   elsewhere in the fantasy world.
 - **`docs/adr/`** — read the ADRs that touch the area you are about to work in. Currently:
-  `0001-roster-format-is-a-gold-concern.md`.
+  `0001-roster-format-is-a-gold-concern.md`,
+  `0002-late-positions-are-held-at-display-time.md`.
 
 This is a single-context repo: one `CONTEXT.md`, one `docs/adr/`, both at the root. There is no
 `CONTEXT-MAP.md` and no per-package context.
