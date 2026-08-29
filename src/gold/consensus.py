@@ -86,19 +86,30 @@ def _aggregates(sources: tuple[str, ...]) -> str:
 # position too costs nothing and rules it out structurally rather than by luck). `ids` labels
 # kickers "PK" where every source here uses "K", so the crosswalk is normalized to "K" first.
 # Each source's expression for one scoring basis. Half-PPR is not a second opinion here, it is the
-# same projection restated, and every source is reconciled to it exactly rather than approximately:
-# Sleeper and FFToday publish half-PPR directly, CBS's half-PPR page 404s but `(standard + ppr) / 2`
-# is an identity at half a point per reception, and ESPN and inhouse publish PPR only, so they are
+# same projection restated, and every source that can be reconciled to it exactly is: Sleeper and
+# FFToday publish half-PPR directly, CBS's half-PPR page 404s but `(standard + ppr) / 2` is an
+# identity at half a point per reception, and ESPN and inhouse publish PPR only, so they are
 # converted with `ppr - 0.5 * rec` against Sleeper's own projected receptions (an identity too, not
 # an estimate — see sleeper.load_projections).
 #
-# Quarterbacks and kickers take a structural zero for receptions. A pass-catcher with no Sleeper
-# reception projection (9 players as of 2026, all deep-roster) yields NULL instead, so the converted
-# arms drop out of the half-PPR blend via the NOT NULL filter below rather than quietly reporting a
-# PPR number as half-PPR.
+# Quarterbacks and kickers take a structural zero for receptions. A pass-catcher Sleeper does not
+# project has no reception count anywhere — CBS and FFToday publish points, not catches — and for
+# him the count is estimated from the PPR total being converted, by the per-position fit below.
+#
+# That estimate replaces an earlier rule that yielded NULL instead, dropping the converted arms out
+# of the half-PPR blend rather than reporting an unconverted PPR number as half-PPR. The rule was
+# right about the risk and wrong about the cost, which grew: it was written when it silently removed
+# 9 deep-roster players, and by 2026 it removed 357 — everyone the in-house model covers and Sleeper
+# does not — including Jayden Higgins (superflex ADP 136) and Ricky Pearsall (129.5). Neither
+# appeared anywhere on the half-PPR league's board, which is how a drafted player can look available:
+# he was never on it to strike off. Being absent from a board is a worse error than being a point or
+# two high on it, and here it is a point or two: see `reception_fit`.
 _SCORINGS = ("ppr", "half_ppr")
 
-_RECEPTIONS_ADJUSTMENT = """0.5 * CASE WHEN {position} IN ('QB', 'K') THEN 0 ELSE receptions.rec END"""
+# Receptions for the conversion: the projected count where a source publishes one, and the fitted
+# estimate where none does. Clamped at zero so a near-zero projection cannot imply negative catches.
+_RECEPTIONS_ADJUSTMENT = """0.5 * CASE WHEN {position} IN ('QB', 'K') THEN 0
+        ELSE COALESCE(receptions.rec, GREATEST(fit.slope * {ppr_points} + fit.intercept, 0)) END"""
 
 
 def _source_arm(scoring: str) -> str:
@@ -113,7 +124,9 @@ def _source_arm(scoring: str) -> str:
     else:
         espn_points = (
             "e.projected_points - "
-            + _RECEPTIONS_ADJUSTMENT.format(position="ids.position")
+            + _RECEPTIONS_ADJUSTMENT.format(
+                position="ids.position", ppr_points="e.projected_points"
+            )
         )
         sleeper_points = "SUM(s.pts_half_ppr)"
         cbs_from = "cbs_half c"
@@ -121,7 +134,9 @@ def _source_arm(scoring: str) -> str:
         fftoday_where = "WHERE f.scoring = 'half_ppr'"
         inhouse_points = (
             "projected_points_full - "
-            + _RECEPTIONS_ADJUSTMENT.format(position="inhouse_projections.position")
+            + _RECEPTIONS_ADJUSTMENT.format(
+                position="inhouse_projections.position", ppr_points="projected_points_full"
+            )
         )
 
     return f"""
@@ -130,6 +145,7 @@ def _source_arm(scoring: str) -> str:
     FROM espn_projections e
     JOIN ids_normalized ids ON ids.espn_id = e.espn_id AND ids.position = e.position
     LEFT JOIN receptions ON receptions.gsis_id = ids.gsis_id
+    LEFT JOIN reception_fit fit ON fit.position = ids.position
 
     UNION ALL
 
@@ -164,9 +180,11 @@ def _source_arm(scoring: str) -> str:
     -- projected_points_full, not projected_points: the external sources all publish a
     -- health-neutral full-season number (see module docstring), so blending in inhouse's
     -- availability-discounted one would be a units mismatch, not a difference of opinion.
-    SELECT player_id, player_name, position, 'inhouse', '{scoring}', {inhouse_points}
+    SELECT player_id, player_name, inhouse_projections.position, 'inhouse', '{scoring}',
+           {inhouse_points}
     FROM inhouse_projections
     LEFT JOIN receptions ON receptions.gsis_id = inhouse_projections.player_id
+    LEFT JOIN reception_fit fit ON fit.position = inhouse_projections.position
     WHERE target_season = (SELECT season FROM current_season)
 """
 
@@ -194,15 +212,38 @@ current_season AS (
         SELECT MAX(season) AS season FROM fftoday_projections
     )
 ),
--- Sleeper's projected receptions, the conversion factor for the PPR-only sources. Deliberately
--- unfiltered by season, matching the sleeper arm's own SUM() below, since the projections archive
--- holds one season at a time.
-receptions AS (
-    SELECT ids.gsis_id, SUM(s.rec) AS rec
+-- Sleeper's projected receptions, the conversion factor for the PPR-only sources, alongside the
+-- PPR total they go with. Deliberately unfiltered by season, matching the sleeper arm's own SUM()
+-- below, since the projections archive holds one season at a time.
+sleeper_receptions AS (
+    SELECT ids.gsis_id, ids.position, SUM(s.rec) AS rec, SUM(s.pts_ppr) AS ppr
     FROM sleeper_projections s
     JOIN ids_normalized ids
         ON TRY_CAST(s.sleeper_id AS DOUBLE) = ids.sleeper_id AND ids.position = s.position
-    GROUP BY ids.gsis_id
+    GROUP BY ids.gsis_id, ids.position
+),
+receptions AS (
+    SELECT gsis_id, SUM(rec) AS rec FROM sleeper_receptions GROUP BY gsis_id
+),
+-- Receptions against PPR points, per position, over everyone Sleeper projects both for — the
+-- estimate used for a pass-catcher Sleeper does not project at all. A season's catches are very
+-- nearly a fixed share of a season's PPR points, because a reception is a point plus the yards it
+-- came with: fitted on 2026, r-squared is 0.990 for tight ends, 0.987 for receivers and 0.874 for
+-- backs, whose points lean on carries instead.
+--
+-- What that buys is small by construction. The players who need the estimate are exactly the ones
+-- no external site projects, so every one of them sits under 80 PPR points, and across that range
+-- the fit is worth 0.55 (TE), 0.57 (WR) and 1.30 (RB) points of half-PPR error at one standard
+-- deviation. A board row is ranked on a number carrying rather more uncertainty than that.
+--
+-- Fitted on Sleeper's own PPR total rather than the consensus median, which is tighter (the same
+-- source's two numbers agree with each other) and available before any blend exists. Applied
+-- against whichever PPR total is being converted, so each arm is corrected on its own scale.
+reception_fit AS (
+    SELECT position, regr_slope(rec, ppr) AS slope, regr_intercept(rec, ppr) AS intercept
+    FROM sleeper_receptions
+    WHERE rec IS NOT NULL AND ppr > 0
+    GROUP BY position
 ),
 -- CBS publishes standard and PPR but not half-PPR; the midpoint of the two is exactly half-PPR.
 cbs_half AS (
