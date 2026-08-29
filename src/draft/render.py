@@ -8,6 +8,7 @@ something that has to be eyeballed on a draft night to know whether it is right.
 
     seat, picks made, next pick        one line, because it is the thing checked against the app
     unmatched picks                    loud, and above everything else
+    marked by hand                     short, and only when there is one
     my roster                          short, and answers "what do I still need"
     best available                     the long list, last
 
@@ -16,6 +17,11 @@ unmatched pick means a player may have been drafted and still be sitting on this
 available — the exact failure the feature exists to prevent — so it goes where it cannot be
 scrolled past, above the board rather than under thirty rows of it. Everything else is ordered by
 how often it is read, which puts the candidate list at the bottom where the eye lands.
+
+The hand-marked block sits under the warning for the same reason the warning is where it is: those
+players are gone on the drafter's own say-so, with nothing from Sleeper behind them, and a mistyped
+mark hides a player who is actually available. It is above the roster because it is the part of the
+screen most likely to be wrong.
 
 ## Missing values print as gaps, never as values
 
@@ -87,15 +93,42 @@ def _cost(value) -> str:
     return f"{value:.1f}"
 
 
-def _header(picks: dict, league: dict) -> str:
-    """Seat, progress and next turn: the line that gets checked against the Sleeper app."""
+def _header(picks: dict, league: dict, marked: list[dict]) -> str:
+    """Seat, progress and next turn: the line that gets checked against the Sleeper app.
+
+    The hand-marked count sits beside the picks made rather than inside it, because a mark is not
+    a pick: the draft has got exactly as far as Sleeper says it has. But the board below has had
+    both subtracted from it, and a board short of two players with nothing on screen to say so
+    reads as a board that has lost them.
+    """
     next_pick = picks["next_pick"]
     turn = f"next pick #{next_pick}" if next_pick is not None else "draft complete"
+    by_hand = f"  ·  {len(marked)} by hand" if marked else ""
     return (
         f"seat {league['seat']} of {league['team_count']}"
-        f"  ·  {picks['picks_made']} picks made"
+        f"  ·  {picks['picks_made']} picks made{by_hand}"
         f"  ·  {turn}"
     )
+
+
+def _marked(marked: list[dict]) -> list[str]:
+    """Who is off the board on the drafter's own say-so, named.
+
+    Named for the same reason an unmatched pick is: a mistyped mark hides a player who is actually
+    available, which is the failure this feature exists to prevent wearing the other face, and the
+    name is the only part of it a drafter can act on. It is also how he knows what to type after a
+    dash to take one back.
+    """
+    if not marked:
+        return []
+
+    lines = ["", f"Marked taken by hand — {len(marked)}"]
+    for player in marked:
+        lines.append(
+            f"  {_text(player.get('player_name'))} "
+            f"({_text(player.get('position'))}, {_text(player.get('team'))})"
+        )
+    return lines
 
 
 def _unmatched(unmatched: list[dict]) -> list[str]:
@@ -195,6 +228,7 @@ def render_board(
     limit: int = 30,
     degraded: bool = False,
     covers_to: int | None = None,
+    marked: list[dict] | tuple = (),
 ) -> str:
     """The whole screen as one string.
 
@@ -206,9 +240,15 @@ def render_board(
     `degraded` and `covers_to` are the rest of what the ranking returned. They are separate
     arguments rather than a dict because they change the words above the table and nothing else,
     and a renderer that had to be handed a ranking result could not be pointed at anything else.
+
+    `marked` is the players the drafter has taken off the board by hand. They are already gone
+    from `candidates` and already counted in `picks` — this is what puts them on screen, so that
+    a subtraction Sleeper never reported is visible rather than inferred from a shorter board.
     """
-    lines = [_header(picks, league)]
+    marked = list(marked)
+    lines = [_header(picks, league, marked)]
     lines += _unmatched(picks["unmatched"])
+    lines += _marked(marked)
     lines += _roster(picks["roster"], league)
     lines += _candidates(candidates, picks, limit, degraded, covers_to)
     return "\n".join(lines)

@@ -9,6 +9,19 @@ board the warehouse built days ago, and prints what is left — then does that a
 seconds for the length of the draft, redrawing only when the picks have actually changed. What
 counts as a change, and what the live line under the board says, are both in `refresh`.
 
+## What the drafter can type at it
+
+A name typed at the running tool marks that player taken by hand, and a name after a dash takes
+the mark back. It is the fallback for the night Sleeper stops answering: marks are held for the
+session and unioned into every board drawn from then on, so the draft stays followable with the
+network down — which is the one failure the rest of this file cannot do anything about.
+
+Lines are read without ever waiting for one, on the same tick as the poll, so typing costs the
+board nothing and a half-typed name is simply still being typed. The terminal echoes it after the
+status line, where the next repaint writes over the start of the line rather than the tail — and
+if a failure message makes that line long enough to swallow the echo, the characters are still in
+the terminal's own buffer and Enter still submits exactly what was typed.
+
 ## The screen appends, and the status line does not
 
 A changed board is drawn *below* the last one rather than over a cleared screen, so the whole
@@ -54,11 +67,14 @@ What it touches, exhaustively:
 - Two reads of `data/warehouse.duckdb` through `src.query.q`, which opens read-only and closes
   before each returns. A draft-night process cannot corrupt what the pipeline built, and cannot
   hold the file lock against a rebuild either.
+- Whatever has been typed at **stdin**, read without blocking and resolved against the board by
+  `marks`. Nothing is written anywhere as a result: a hand-mark lives in memory until Ctrl-C.
 
-## Nothing is typed in
+## Nothing is configured by typing
 
 The league ID and season come from `src.silver.sleeper`, so the repo holds one league ID rather
-than two that can disagree. Everything else — seat, roster, team count, rounds, starting slots —
+than two that can disagree. A player's name typed during the draft is the one thing that is ever
+typed at this tool, and it is resolved against the board rather than configuring anything. Everything else — seat, roster, team count, rounds, starting slots —
 is read out of the draft record. The one configured name is the Sleeper username below, which is
 resolved to a user ID against the API and then to a seat against the draft order.
 
@@ -76,12 +92,15 @@ is a screen being drawn.
 """
 
 import argparse
+import select
+import sys
 import time
 from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
 
+from src.draft.marks import combine, read_mark
 from src.draft.picks import ingest_picks, picks_made
 from src.draft.refresh import fingerprint, status_line
 from src.draft.render import render_board
@@ -255,13 +274,20 @@ def fetch_picks(context: dict) -> list[dict]:
     return _get(f"/draft/{context['draft']['draft_id']}/picks")
 
 
-def screen(context: dict, picks: list[dict], limit: int = DEFAULT_LIMIT) -> str:
+def screen(
+    context: dict, picks: list[dict], limit: int = DEFAULT_LIMIT, marked=()
+) -> str:
     """One picks payload against the frozen half, drawn — subtract, rank, render.
 
     Pure given the context, which is what lets the loop be driven over hand-written payloads
     without a network or a warehouse behind it.
+
+    `marked` is the players the drafter has taken off the board by hand. They are unioned into the
+    payload here rather than handled separately, so that everything below this line sees one list
+    of who is gone and `ingest_picks` does the deduplication it was written to do.
     """
-    result = ingest_picks(picks, context["board"], context["league"])
+    marked = list(marked)
+    result = ingest_picks(combine(picks, marked), context["board"], context["league"])
     ranked = rank_by_cost_of_waiting(context["board"], context["survival"], result)
 
     # The bye week is joined back on by ID rather than carried through the ranking: what the
@@ -272,7 +298,7 @@ def screen(context: dict, picks: list[dict], limit: int = DEFAULT_LIMIT) -> str:
     )
     return render_board(
         candidates, result, context["league"], limit,
-        degraded=ranked["degraded"], covers_to=ranked["covers_to"],
+        degraded=ranked["degraded"], covers_to=ranked["covers_to"], marked=marked,
     )
 
 
@@ -291,9 +317,42 @@ def _write(text: str) -> None:
     print(text, end="", flush=True)
 
 
-def _rule(made: int) -> str:
-    """The line between one board and the next, naming the pick that brought the new one."""
-    return f"── pick {made} " + "─" * 48
+def _typed(stream=None) -> list[str]:
+    """Every whole line the drafter has typed since the last look, without waiting for one.
+
+    The terminal hands a line over on the Enter key and not before, so a name half typed when a
+    tick comes round is not seen and not lost — it is still being typed, and arrives on the tick
+    after the drafter finishes it. Nothing here ever blocks: the poll cadence is the tool's, and a
+    read that waited for a name would stop the board dead every time nobody was typing one.
+
+    A stream that cannot be selected on — not a terminal, already closed, a pipe on a platform
+    that will not have it — gives back nothing rather than raising. Typing is the fallback, and a
+    fallback that could take the tool down with it would be worth less than not having it.
+    """
+    stream = sys.stdin if stream is None else stream
+    lines = []
+    try:
+        while select.select([stream], [], [], 0)[0]:
+            line = stream.readline()
+            if not line:
+                # End of input: stdin is closed or redirected from something exhausted. Nothing
+                # more will ever be typed, and select would keep saying ready forever.
+                break
+            lines.append(line)
+    except (OSError, ValueError):
+        pass
+    return lines
+
+
+def _rule(made: int, marked: int = 0) -> str:
+    """The line between one board and the next, naming the pick that brought the new one.
+
+    A hand-mark brings a new board without moving the draft on, so the count is named beside the
+    pick rather than folded into it — two boards in a row under the same pick number is exactly
+    what marking a player looks like, and the rule has to say why.
+    """
+    label = f"pick {made}" if not marked else f"pick {made} + {marked} by hand"
+    return f"── {label} " + "─" * 48
 
 
 def watch(
@@ -303,19 +362,28 @@ def watch(
     sleep=time.sleep,
     now=datetime.now,
     write=_write,
+    keys=_typed,
     interval: float = REFRESH_SECONDS,
 ) -> None:
     """Draw the board, then keep it current until interrupted.
 
-    `context` is what `prepare` returned. The four effects default to the real ones and are
-    parameters so the loop can be driven without a clock, a network or a terminal.
+    `context` is what `prepare` returned. The five effects default to the real ones and are
+    parameters so the loop can be driven without a clock, a network, a terminal or a keyboard.
 
     A poll that fails is a line on the screen and nothing more: it is reported with the time of
     the last check that did work, and the next tick asks again. Nothing short of Ctrl-C ends this,
     because a session that ends at pick eleven is a session nobody restarts in time.
+
+    A name typed at it is read on the next tick and marked taken by hand — see `marks` for what
+    that resolves against and what it refuses. Marks are held here, for the session, and unioned
+    into every draw from the moment they are made: the last payload a poll returned is kept, so a
+    mark still redraws the board on a tick Sleeper did not answer, which is the whole reason the
+    drafter is typing in the first place.
     """
     poll = poll or (lambda: fetch_picks(context))
 
+    marked = {}         # board player_id -> the board row, in the order they were marked by hand
+    picks = []          # the last payload a poll actually returned, kept across a failed one
     drawn = None        # the fingerprint of the board currently on screen
     checked_at = None   # when a poll last succeeded, which is what the status line reports
     made = 0
@@ -327,19 +395,39 @@ def watch(
             moment = now()
             error = None
             try:
-                payload = poll()
+                picks = poll()
             except requests.RequestException as failure:
                 error = failure
             else:
                 checked_at = moment
-                made = picks_made(payload)
-                mark = fingerprint(payload)
-                if mark != drawn:
-                    # End whatever status line is sitting on the terminal before drawing past it.
-                    lead = "\n" if drawn is None else f"\n{_rule(made)}\n"
-                    write(f"{lead}\n{screen(context, payload, limit)}\n")
-                    drawn = mark
-                    status_width = 0
+
+            for line in keys():
+                if not line.strip():
+                    # Enter on an empty line is how a half-typed name gets cleared.
+                    continue
+                outcome = read_mark(line, context["board"], marked)
+                if outcome["action"] == "mark":
+                    marked[outcome["player"]["player_id"]] = outcome["player"]
+                elif outcome["action"] == "unmark":
+                    marked.pop(outcome["player"]["player_id"], None)
+                # Every outcome, refusals included: a mark that said nothing would be read as one
+                # that worked. Ends the status line rather than being written over it.
+                write(f"\n{outcome['message']}\n")
+                status_width = 0
+
+            combined = combine(picks, marked.values())
+            made = picks_made(combined)
+            seen = fingerprint(combined)
+
+            # A failed poll on its own draws nothing — the board has not changed and the status
+            # line says the connection has. A mark is a change, and gets drawn whether Sleeper
+            # answered or not.
+            if (error is None or marked) and seen != drawn:
+                # End whatever status line is sitting on the terminal before drawing past it.
+                lead = "\n" if drawn is None else f"\n{_rule(made, len(marked))}\n"
+                write(f"{lead}\n{screen(context, picks, limit, marked.values())}\n")
+                drawn = seen
+                status_width = 0
 
             line = status_line(made, checked_at, moment, error)
             # Padded to the last line's width: a shorter line written over a longer one otherwise
@@ -363,7 +451,10 @@ def main(limit: int = DEFAULT_LIMIT, once: bool = False) -> None:
         return
 
     context = prepare()
-    print(f"{built}\nrefreshing every {REFRESH_SECONDS:.0f}s — Ctrl-C to stop")
+    print(
+        f"{built}\nrefreshing every {REFRESH_SECONDS:.0f}s — type a name to mark him taken by "
+        "hand, -name to undo, Ctrl-C to stop"
+    )
     watch(context, limit)
 
 
