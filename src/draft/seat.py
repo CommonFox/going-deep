@@ -25,6 +25,9 @@ A draft that is not a snake, and a draft whose order has not been drawn yet. Bot
 rather than defaults because the alternative is a pick number that is wrong without looking wrong
 — `next_pick_number` reverses every even round, so against a linear draft it is right in round one
 and wrong from round two onwards, which is the worst shape an error can have on a draft night.
+
+`check_priced_for` refuses a third thing for the same reason, one step later: a draft whose teams
+and starting slots are not the ones the board on screen was priced for.
 """
 
 # Sleeper's own settings keys, mapped onto the slot names `picks.SLOT_ELIGIBILITY` uses. `slots_bn`
@@ -102,3 +105,47 @@ def resolve_seat(draft: dict, user_id: str) -> dict:
         "rounds": int(settings["rounds"]),
         "slots": _slots(settings),
     }
+
+
+def check_priced_for(league: dict, priced: dict) -> None:
+    """Refuse a draft whose shape is not the one the board on screen was priced for.
+
+    Pure. `league` is what `resolve_seat` read out of the draft record; `priced` is the shape the
+    warehouse priced this `league_key` for, as `league_settings` records it.
+
+    Watching a draft found *through* the league made this impossible — the draft and the board
+    came from the same place. A draft ID typed by hand does not: a Sleeper mock is a draft record
+    with `league_id: null` and whatever settings the lobby chose. Read a 12-team 1QB mock against
+    a 14-team superflex board and every number still renders, correctly formatted, priced against
+    a replacement level for a league nobody is drafting in.
+
+    Only what pricing depends on is compared. Team count and starting slots set replacement level;
+    rounds set how deep the draft goes and leave what a player is worth alone, so a ten-round mock
+    off a fifteen-round board is fine and is not mentioned here.
+    """
+    mismatches = []
+
+    if int(league["team_count"]) != int(priced["team_count"]):
+        mismatches.append(
+            f"{league['team_count']} teams, but the board is priced for {priced['team_count']}"
+        )
+
+    theirs, ours = league["slots"], priced["slots"]
+    for slot in sorted(set(theirs) | set(ours)):
+        if int(theirs.get(slot, 0)) != int(ours.get(slot, 0)):
+            mismatches.append(
+                f"{slot}: this draft starts {theirs.get(slot, 0)}, "
+                f"the board is priced for {ours.get(slot, 0)}"
+            )
+
+    if not mismatches:
+        return None
+
+    listed = "\n  ".join(mismatches)
+    raise ValueError(
+        "This draft is not the league the board was priced for:\n  "
+        f"{listed}\n"
+        "Every value on screen comes from a warehouse build for the other shape, and would "
+        "render correctly while being priced against the wrong replacement level. Draft in a "
+        "lobby matching the league, or rebuild the board for this one."
+    )
