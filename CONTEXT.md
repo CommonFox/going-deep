@@ -135,3 +135,16 @@ is a fact about a player. Below the last player at a position the drop is his ow
 replacement, because replacement level is zero by construction.
 _Avoid_: tier (already spent on an offensive line's grade), run (that is what a room does, not
 what a board looks like)
+
+**Late position**:
+A position whose supply outlasts the draft: one starting slot, dozens on the **board**, and
+replacement level flat behind the first few — kicker and defense, plus the punter in the league
+that starts one. **Cost of waiting** cannot price one, because it weighs a single player's chance
+of being taken against the drop behind him, and the answer for a late position is always that
+someone almost as good is there ten rounds later. So they are *held* rather than repriced: kept
+off the default board and out of the **cliff** block until one round remains for each late slot
+the league starts, and shown in full the moment a drafter narrows the board to one by name. The
+values themselves are untouched — a starting kicker really does clear replacement level, and the
+hold is a claim about when to ask, not about what he is worth.
+_Avoid_: streaming position, low-value position, non-skill position (all three are claims about
+value, and the value is not what is in dispute)
