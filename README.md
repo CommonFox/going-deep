@@ -412,16 +412,23 @@ sequence:
 ./scripts/build_warehouse.sh
 ```
 
-On draft night, render the Sleeper board once and exit:
+On draft night, keep the Sleeper board on screen and refreshing as the picks come in:
 
 ```bash
-python -m src.draft.live              # the top 30 still available
+python -m src.draft.live              # the top 30 still available, redrawn as the draft moves
 python -m src.draft.live --limit 50
+python -m src.draft.live --once       # draw it once and exit
 ```
 
-It resolves the seat from the draft order, subtracts the picks already made, and shows the roster
-so far and the next overall pick number. It reads the warehouse read-only, refuses to run against
-a build more than a day old, and has no code path that could submit a pick.
+It resolves the seat from the draft order, subtracts the picks already made, ranks what is left by
+what waiting for it would cost, and shows the roster so far and the next overall pick number.
+
+Type a player's name at it to mark him taken by hand, and `-name` to take that back. Marks are held
+for the session and unioned with the picks Sleeper reports rather than replacing them, so the draft
+stays followable through an outage — which is the one thing polling cannot fix by itself.
+
+It reads the warehouse read-only, refuses to run against a build more than a day old, and has no
+code path that could submit a pick.
 
 Query the warehouse with the DuckDB CLI or Python:
 

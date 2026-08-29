@@ -194,6 +194,16 @@ def typist(*batches):
     return keys
 
 
+def available(drawn: str) -> str:
+    """The candidate list out of one drawn board — who is actually still on it.
+
+    A hand-marked player is deliberately *named* on the screen he has been subtracted from, under
+    the block saying the drafter marked him, so "is he still on the board" is a question about
+    this section and not about whether his name appears anywhere.
+    """
+    return drawn.split("Best available")[-1]
+
+
 def run_typed(*outcomes, typed, interval: float = 0.5):
     """Drive `watch` with something typed at it, and give back everything it wrote."""
     written = []
@@ -212,7 +222,7 @@ def test_a_typed_name_marks_the_player_and_redraws_without_him():
 
     drawn = boards(written)
     assert len(drawn) == 1
-    assert "Bravo Wideout" not in drawn[0]
+    assert "Bravo Wideout" not in available(drawn[0])
 
 
 # 19. A mark that lasted one tick would be worse than none: the drafter would have to retype it
@@ -223,7 +233,7 @@ def test_a_mark_survives_the_refreshes_that_follow_it():
                         typed=[["bravo wideout"], [], []])
 
     for drawn in boards(written):
-        assert "Bravo Wideout" not in drawn
+        assert "Bravo Wideout" not in available(drawn)
 
 
 # 20. Unioned with the API's picks, never instead of them — a mark that replaced them would put
@@ -231,7 +241,7 @@ def test_a_mark_survives_the_refreshes_that_follow_it():
 def test_a_mark_is_combined_with_the_picks_the_api_reports():
     written = run_typed([pick(1, "4034")], typed=[["bravo wideout"]])
 
-    drawn = boards(written)[-1]
+    drawn = available(boards(written)[-1])
     assert "Alpha Back" not in drawn
     assert "Bravo Wideout" not in drawn
     assert "Charlie Ender" in drawn
@@ -257,8 +267,8 @@ def test_a_mark_redraws_the_board_on_a_tick_the_poll_failed():
 
     drawn = boards(written)
     assert len(drawn) == 2
-    assert "Bravo Wideout" in drawn[0]
-    assert "Bravo Wideout" not in drawn[1]
+    assert "Bravo Wideout" in available(drawn[0])
+    assert "Bravo Wideout" not in available(drawn[1])
 
 
 # 23. Enter on an empty line is how a drafter clears a half-typed name.
@@ -276,5 +286,5 @@ def test_an_unmark_puts_the_player_back_on_the_board():
 
     drawn = boards(written)
     assert len(drawn) == 2
-    assert "Bravo Wideout" not in drawn[0]
-    assert "Bravo Wideout" in drawn[1]
+    assert "Bravo Wideout" not in available(drawn[0])
+    assert "Bravo Wideout" in available(drawn[1])
