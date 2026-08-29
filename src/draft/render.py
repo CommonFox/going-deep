@@ -273,20 +273,30 @@ def _ranking(picks: dict, degraded: bool, covers_to: int | None) -> list[str]:
 
 
 def _candidates(
-    candidates: pd.DataFrame, picks: dict, limit: int, degraded: bool, covers_to: int | None
+    candidates: pd.DataFrame, picks: dict, limit: int, degraded: bool, covers_to: int | None,
+    position: str | None = None,
 ) -> list[str]:
-    """The board that is left, most expensive to pass on first, cut to what fits on a screen."""
+    """The board that is left, most expensive to pass on first, cut to what fits on a screen.
+
+    `position` is what the board has been narrowed to, and is named in the heading rather than
+    left to be inferred from the rows. A drafter who typed `qb` four picks ago and forgot is
+    otherwise reading three quarterbacks as the whole of what is left.
+    """
     shown = candidates.head(limit)
     rule, note = _ranking(picks, degraded, covers_to)
+    scope = f" ({position} only)" if position else ""
     lines = [
         "",
-        f"Best available — {len(shown)} of {len(candidates)}{rule}",
+        f"Best available{scope} — {len(shown)} of {len(candidates)}{rule}",
         note,
         f"  {'#':>3}  {'POS':<5}{'PLAYER':<{_NAME_WIDTH}}{'TM':<5}{'BYE':>3}{'PoR':>9}"
         f"{'SURV':>7}{'COST':>9}",
     ]
     if shown.empty:
-        lines.append("  nobody left on the board")
+        # Which position is empty, never just that something is. "Nobody left on the board" under
+        # a quarterback filter describes a finished draft, and reads like one.
+        empty = f"no {position} left on the board" if position else "nobody left on the board"
+        lines.append(f"  {empty}")
         return lines
 
     for rank, row in enumerate(shown.itertuples(), start=1):
@@ -308,6 +318,7 @@ def render_board(
     covers_to: int | None = None,
     marked: list[dict] | tuple = (),
     guidance: dict | None = None,
+    position: str | None = None,
 ) -> str:
     """The whole screen as one string.
 
@@ -327,6 +338,10 @@ def render_board(
     `guidance` is what `composition_guidance` returned, or None for a screen without it. It is
     printed beside the ranking and changes nothing about it: the candidate list is the same list,
     in the same order, whether it is passed or not.
+
+    `position` is the position the board has been narrowed to, or None for the whole board. It
+    names the scope of the candidate list and touches nothing above it — the roster, the warning
+    and the opening shape are claims about the draft, not about what the drafter is looking at.
     """
     marked = list(marked)
     lines = [_header(picks, league, marked)]
@@ -334,5 +349,5 @@ def render_board(
     lines += _marked(marked)
     lines += _roster(picks["roster"], league)
     lines += _guidance(guidance)
-    lines += _candidates(candidates, picks, limit, degraded, covers_to)
+    lines += _candidates(candidates, picks, limit, degraded, covers_to, position)
     return "\n".join(lines)
