@@ -556,6 +556,17 @@ def cliffs(*rows: tuple) -> pd.DataFrame:
 # the screen already uses.
 
 
+def depth_row(out: str, position: str) -> str:
+    """The one depth line about one position.
+
+    Found inside the depth section rather than anywhere on screen: the roster block above names
+    positions too, so `QB` alone matches two lines that mean entirely different things.
+    """
+    rows = [row for row in section(out, "Depth") if row.split()[0] == position]
+    assert len(rows) == 1, f"expected one depth row for {position}, got {rows}"
+    return rows[0]
+
+
 # 37. Both numbers, because either alone is unreadable: three left is fine behind a four-point
 # step and an emergency behind a forty-point one.
 def test_each_position_shows_how_many_are_left_above_the_drop_and_how_big_it_is():
@@ -563,7 +574,7 @@ def test_each_position_shows_how_many_are_left_above_the_drop_and_how_big_it_is(
         candidates(), ingested(), LEAGUE,
         cliffs=cliffs(("QB", 3, 80.4, 12), ("RB", 6, 8.2, 41)),
     )
-    passer = line_naming(out, "QB ")
+    passer = depth_row(out, "QB")
 
     assert "3" in passer and "80.4" in passer
 
@@ -574,7 +585,7 @@ def test_a_position_shows_how_many_are_left_at_it_in_total():
     out = render_board(
         candidates(), ingested(), LEAGUE, cliffs=cliffs(("QB", 3, 80.4, 12))
     )
-    assert "12" in line_naming(out, "QB ")
+    assert "12" in depth_row(out, "QB")
 
 
 # 39. The same order the roster block reads in. A block whose rows moved between ticks would be
