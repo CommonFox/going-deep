@@ -327,3 +327,30 @@ def test_there_is_no_pick_after_the_seats_last_one():
     result = ingest_picks(through_the_last_gap, board(), league(seat=1))
     assert result["next_pick"] == 197
     assert result["pick_after_next"] is None
+
+
+# Issue #38 needs one thing the roster frame cannot give it: what my picks *were*, by position and
+# in order. The frame reports an assignment — a back who fell to the flex is in the flex row, and
+# the bench mixes every position together — so the opening's composition cannot be read back out
+# of it. This is the same picks, unassigned.
+def test_my_own_picks_are_reported_in_draft_order_with_their_positions():
+    result = ingest_picks(
+        [
+            pick("5849", pick_no=1, roster_id=MY_ROSTER, position="WR"),
+            pick("4034", pick_no=2, roster_id=ANOTHER_ROSTER),
+            pick("6794", pick_no=3, roster_id=MY_ROSTER, position="QB"),
+        ],
+        board(
+            {"player_id": "00-0000002", "sleeper_id": "5849", "player_name": "My Receiver",
+             "position": "WR"},
+            {"player_id": "00-0000001", "sleeper_id": "4034", "player_name": "Their Back"},
+            {"player_id": "00-0000003", "sleeper_id": "6794", "player_name": "My Quarterback",
+             "position": "QB"},
+        ),
+        league(),
+    )
+
+    assert [player["player_name"] for player in result["mine"]] == [
+        "My Receiver", "My Quarterback"
+    ]
+    assert [player["position"] for player in result["mine"]] == ["WR", "QB"]

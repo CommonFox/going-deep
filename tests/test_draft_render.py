@@ -365,3 +365,120 @@ def test_the_players_marked_by_hand_are_named_on_screen():
 def test_a_draft_with_nothing_marked_by_hand_says_nothing_about_it():
     out = render_board(candidates({"player_name": "Still There"}), ingested(), LEAGUE)
     assert "hand" not in out.lower()
+
+
+# Issue #38's render cases. Composition guidance is the one signal on this screen that is not
+# about a player: it says which roster shapes the opening is still on track for, read from the
+# plan table at run time. It sits *beside* the ranking rather than inside it — the ranking is the
+# recommendation and this is the thing a drafter overrules it with, and folding one into the other
+# would leave neither auditable.
+
+
+def guidance(**overrides) -> dict:
+    """What `composition_guidance` hands over, defaulted to a live band with a leader."""
+    bands = pd.DataFrame(
+        [
+            {"position": "QB", "count": 1, "plans": 3, "points_vs_field": 0.0,
+             "win_rate": 0.25, "spread": 38.0},
+            {"position": "QB", "count": 2, "plans": 1, "points_vs_field": 38.0,
+             "win_rate": 0.44, "spread": 38.0},
+            {"position": "RB", "count": 1, "plans": 3, "points_vs_field": 12.7,
+             "win_rate": 0.31, "spread": 12.7},
+            {"position": "RB", "count": 2, "plans": 1, "points_vs_field": 0.0,
+             "win_rate": 0.25, "spread": 12.7},
+        ]
+    )
+    return {
+        "withdrawn": False,
+        "reason": None,
+        "opening_rounds": 5,
+        "picks_spent": 4,
+        "taken": {"QB": 1, "RB": 1, "WR": 1, "TE": 1},
+        "open_plans": 4,
+        "total_plans": 10,
+        "bands": bands,
+        "best": {"position": "QB", "count": 2, "plans": 1, "points_vs_field": 38.0,
+                 "win_rate": 0.44, "spread": 38.0},
+        "keeps_best": ["QB"],
+        "closes_best": ["RB", "WR", "TE"],
+        **overrides,
+    }
+
+
+def test_the_opening_shape_is_shown_beside_the_ranking():
+    out = render_board(
+        candidates({"player_name": "Bijan Robinson"}), ingested(), LEAGUE,
+        guidance=guidance(),
+    )
+    heading = line_naming(out, "Opening shape")
+
+    # Beside the ranking means above it and outside it: a block of its own, not a column on a
+    # candidate row, so that nothing about it can be mistaken for part of the order below.
+    assert out.index(heading) < out.index(line_naming(out, "Best available"))
+    assert not any("Opening shape" in row for row in section(out, "Best available"))
+
+
+def test_the_guidance_names_a_band_rather_than_a_composition():
+    out = render_board(candidates(), ingested(), LEAGUE, guidance=guidance())
+    rows = section(out, "Opening shape")
+
+    # A position and a count, and the score behind it — never a composition string, because the
+    # plan table records no dispersion and cannot tell the leading compositions apart.
+    assert any("QB" in row and "2" in row and "38" in row for row in rows)
+    assert "2QB2RB1TE" not in out
+
+
+# 33. Guidance never changes the order of the recommendations.
+def test_guidance_does_not_reorder_the_recommendations():
+    board = candidates(
+        {"player_name": "A Quarterback", "position": "QB", "cost_of_waiting": 60.0},
+        {"player_name": "A Back", "position": "RB", "cost_of_waiting": 40.0},
+        {"player_name": "A Receiver", "position": "WR", "cost_of_waiting": 20.0},
+    )
+    without = render_board(board, ingested(), LEAGUE)
+    with_guidance = render_board(board, ingested(), LEAGUE, guidance=guidance())
+
+    assert section(without, "Best available") == section(with_guidance, "Best available")
+
+
+# 35. A candidate whose position would close the best-scoring open band is reported as doing so.
+def test_the_positions_that_would_close_the_best_band_are_named_on_screen():
+    out = render_board(candidates(), ingested(), LEAGUE, guidance=guidance())
+    rows = section(out, "Opening shape")
+
+    closing = [row for row in rows if "RB" in row and "WR" in row and "TE" in row]
+    assert closing, f"no line named the positions that close the band: {rows}"
+
+
+# 32. Guidance is absent, and *marked* absent, once the opening the plan table covers is over.
+def test_withdrawn_guidance_says_so_rather_than_quietly_vanishing():
+    out = render_board(
+        candidates(), ingested(), LEAGUE,
+        guidance=guidance(
+            withdrawn=True,
+            reason="the plan table covers the first 5 rounds, which are behind us",
+            bands=pd.DataFrame(columns=["position", "count", "plans", "points_vs_field",
+                                        "win_rate", "spread"]),
+            best=None, keeps_best=[], closes_best=[], open_plans=0, picks_spent=5,
+        ),
+    )
+    assert "withdrawn" in line_naming(out, "Opening shape").lower()
+    assert "the plan table covers the first 5 rounds" in out
+
+
+def test_an_opening_no_plan_covers_says_so_rather_than_showing_a_band():
+    out = render_board(
+        candidates(), ingested(), LEAGUE,
+        guidance=guidance(
+            reason="no plan for this seat matches the opening so far",
+            bands=pd.DataFrame(columns=["position", "count", "plans", "points_vs_field",
+                                        "win_rate", "spread"]),
+            best=None, keeps_best=[], closes_best=[], open_plans=0,
+        ),
+    )
+    assert "no plan for this seat matches the opening so far" in out
+
+
+def test_a_screen_with_no_guidance_says_nothing_about_the_opening():
+    out = render_board(candidates(), ingested(), LEAGUE)
+    assert "Opening shape" not in out
