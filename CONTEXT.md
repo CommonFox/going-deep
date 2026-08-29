@@ -100,6 +100,14 @@ A **plan** stated as a specific sequence — quarterback first, then two backs. 
 distinguishing from **composition** where the sequence itself is the claim being tested.
 _Avoid_: draft order (that means **seat** ordering, not position ordering)
 
+**Band**:
+Every **plan** sharing one position's count — "the openings that take two quarterbacks" — scored
+as the mean of its members. The unit composition guidance is stated in, because the plan table
+records trials but no dispersion: the leading compositions sit within simulation noise of each
+other, while the bands underneath them are far apart. A band is never a recommendation to draft a
+specific player.
+_Avoid_: bucket, tier (the **board** already spends *tier* on an offensive line's grade)
+
 **Field**:
 The other teams in a simulated draft, and how they behave. A field drafting straight off ADP is the
 friendliest possible room, because the focal team is the only one deviating.

@@ -52,7 +52,14 @@ BOARD = pd.DataFrame(
 # by points over replacement and says so on screen, which renders exactly as fully as the other.
 SURVIVAL = pd.DataFrame(columns=["player_id", "overall_pick", "p_survives"])
 
-CONTEXT = {"board": BOARD, "survival": SURVIVAL, "draft": {"draft_id": "1"}, "league": LEAGUE}
+# Empty for the same reason, and a state the warehouse can genuinely be in: with no plans for this
+# seat the opening guidance is withdrawn and says so, which is a screen like any other.
+PLANS = pd.DataFrame(columns=["draft_slot", "plan", "trials", "points_vs_field", "win_rate"])
+
+CONTEXT = {
+    "board": BOARD, "survival": SURVIVAL, "plans": PLANS,
+    "draft": {"draft_id": "1"}, "league": LEAGUE,
+}
 
 
 def pick(number: int, sleeper_id: str, roster_id: int = 3) -> dict:

@@ -379,13 +379,13 @@ def guidance(**overrides) -> dict:
     bands = pd.DataFrame(
         [
             {"position": "QB", "count": 1, "plans": 3, "points_vs_field": 0.0,
-             "win_rate": 0.25, "spread": 38.0},
+             "win_rate": 0.25},
             {"position": "QB", "count": 2, "plans": 1, "points_vs_field": 38.0,
-             "win_rate": 0.44, "spread": 38.0},
+             "win_rate": 0.44},
             {"position": "RB", "count": 1, "plans": 3, "points_vs_field": 12.7,
-             "win_rate": 0.31, "spread": 12.7},
+             "win_rate": 0.31},
             {"position": "RB", "count": 2, "plans": 1, "points_vs_field": 0.0,
-             "win_rate": 0.25, "spread": 12.7},
+             "win_rate": 0.25},
         ]
     )
     return {
@@ -398,7 +398,7 @@ def guidance(**overrides) -> dict:
         "total_plans": 10,
         "bands": bands,
         "best": {"position": "QB", "count": 2, "plans": 1, "points_vs_field": 38.0,
-                 "win_rate": 0.44, "spread": 38.0},
+                 "win_rate": 0.44},
         "keeps_best": ["QB"],
         "closes_best": ["RB", "WR", "TE"],
         **overrides,
@@ -458,7 +458,7 @@ def test_withdrawn_guidance_says_so_rather_than_quietly_vanishing():
             withdrawn=True,
             reason="the plan table covers the first 5 rounds, which are behind us",
             bands=pd.DataFrame(columns=["position", "count", "plans", "points_vs_field",
-                                        "win_rate", "spread"]),
+                                        "win_rate"]),
             best=None, keeps_best=[], closes_best=[], open_plans=0, picks_spent=5,
         ),
     )
@@ -472,7 +472,7 @@ def test_an_opening_no_plan_covers_says_so_rather_than_showing_a_band():
         guidance=guidance(
             reason="no plan for this seat matches the opening so far",
             bands=pd.DataFrame(columns=["position", "count", "plans", "points_vs_field",
-                                        "win_rate", "spread"]),
+                                        "win_rate"]),
             best=None, keeps_best=[], closes_best=[], open_plans=0,
         ),
     )

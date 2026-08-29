@@ -10,6 +10,7 @@ something that has to be eyeballed on a draft night to know whether it is right.
     unmatched picks                    loud, and above everything else
     marked by hand                     short, and only when there is one
     my roster                          short, and answers "what do I still need"
+    opening shape                      short, and answers "what am I still on track for"
     best available                     the long list, last
 
 The order is the only real decision here, and it is decided by what a wrong screen costs. An
@@ -22,6 +23,12 @@ The hand-marked block sits under the warning for the same reason the warning is 
 players are gone on the drafter's own say-so, with nothing from Sleeper behind them, and a mistyped
 mark hides a player who is actually available. It is above the roster because it is the part of the
 screen most likely to be wrong.
+
+The opening-shape block sits between the roster and the board deliberately. It is a claim about
+the roster rather than about a player, so it belongs with the roster; and it must be *beside* the
+ranking rather than inside it, because the ranking is the recommendation and this is the thing a
+drafter overrules it with. A column of it on a candidate row would fold the two together and leave
+neither auditable — which is the same reason the repo keeps a blended metric's inputs visible.
 
 ## Missing values print as gaps, never as values
 
@@ -168,6 +175,76 @@ def _roster(roster: pd.DataFrame, league: dict) -> list[str]:
     return lines
 
 
+def _signed(value) -> str:
+    """A band's score, with the sign written out — the direction is the whole of the reading."""
+    if value is None or pd.isna(value):
+        return _MISSING
+    return f"{value:+.1f}"
+
+
+def _either(positions: list[str]) -> str:
+    """A list of positions as a drafter would say it: `RB, WR or TE`."""
+    if len(positions) < 2:
+        return "".join(positions)
+    return f"{', '.join(positions[:-1])} or {positions[-1]}"
+
+
+def _band(row) -> str:
+    """A band named the way the guidance states it — a count of a position, never a plan."""
+    return f"{int(row['count'])} {row['position']}"
+
+
+def _guidance(guidance: dict | None) -> list[str]:
+    """What the opening is still on track for, beside the ranking and never inside it.
+
+    Bands rather than plans, because the plan table records no dispersion and the leading
+    compositions cannot be told apart from simulation noise. Every open band is printed, not only
+    the best one: being warned away from a shape that scored badly is half of what this is for,
+    and a leader on its own does not say what the alternatives cost.
+
+    A block that has nothing to say still says that. Guidance the research does not support is
+    withdrawn rather than extrapolated, and an opening no plan covers is reported as such — either
+    one silently vanishing would read as guidance that agreed with whatever the drafter just did.
+    """
+    if guidance is None:
+        return []
+
+    if guidance["withdrawn"]:
+        return ["", "Opening shape — withdrawn", f"  {guidance['reason']}"]
+
+    spent = [f"{guidance['picks_spent']} of {guidance['opening_rounds']} opening picks"]
+    if guidance["taken"]:
+        spent.append(
+            ", ".join(f"{position} {count}" for position, count in guidance["taken"].items())
+        )
+    spent.append(f"{guidance['open_plans']} of {guidance['total_plans']} plans still open")
+    lines = ["", "Opening shape — " + "  ·  ".join(spent)]
+
+    best = guidance["best"]
+    if best is None:
+        lines.append(f"  {guidance['reason']}")
+        return lines
+
+    plans = int(best["plans"])
+    lines.append(
+        f"  best band still open   {_band(best)}   {_signed(best['points_vs_field'])} vs field"
+        f"  ·  {_percent(best['win_rate'])} wins  ·  over {plans} plan"
+        f"{'' if plans == 1 else 's'}"
+    )
+    if guidance["closes_best"]:
+        lines.append(
+            f"  {_either(guidance['closes_best'])} now closes it — only "
+            f"{_either(guidance['keeps_best'])} keeps it open"
+        )
+    for position, group in guidance["bands"].groupby("position", sort=False):
+        counts = "   ".join(
+            f"{int(count)} {_signed(score):>6}"
+            for count, score in zip(group["count"], group["points_vs_field"])
+        )
+        lines.append(f"  {position:<6}{counts}")
+    return lines
+
+
 def _ranking(picks: dict, degraded: bool, covers_to: int | None) -> list[str]:
     """How the list below was ordered, and — when it is not the good rule — why not.
 
@@ -229,6 +306,7 @@ def render_board(
     degraded: bool = False,
     covers_to: int | None = None,
     marked: list[dict] | tuple = (),
+    guidance: dict | None = None,
 ) -> str:
     """The whole screen as one string.
 
@@ -244,11 +322,16 @@ def render_board(
     `marked` is the players the drafter has taken off the board by hand. They are already gone
     from `candidates` and already counted in `picks` — this is what puts them on screen, so that
     a subtraction Sleeper never reported is visible rather than inferred from a shorter board.
+
+    `guidance` is what `composition_guidance` returned, or None for a screen without it. It is
+    printed beside the ranking and changes nothing about it: the candidate list is the same list,
+    in the same order, whether it is passed or not.
     """
     marked = list(marked)
     lines = [_header(picks, league, marked)]
     lines += _unmatched(picks["unmatched"])
     lines += _marked(marked)
     lines += _roster(picks["roster"], league)
+    lines += _guidance(guidance)
     lines += _candidates(candidates, picks, limit, degraded, covers_to)
     return "\n".join(lines)
