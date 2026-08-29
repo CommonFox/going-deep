@@ -187,11 +187,16 @@ def _signed(value) -> str:
     return f"{value:+.1f}"
 
 
-def _either(positions: list[str]) -> str:
-    """A list of positions as a drafter would say it: `RB, WR or TE`."""
+def _listed(positions: list[str], conjunction: str) -> str:
+    """A list of positions as a drafter would say it: `RB, WR or TE`, `K and DST`."""
     if len(positions) < 2:
         return "".join(positions)
-    return f"{', '.join(positions[:-1])} or {positions[-1]}"
+    return f"{', '.join(positions[:-1])} {conjunction} {positions[-1]}"
+
+
+def _either(positions: list[str]) -> str:
+    """The positions that keep an opening open — any one of them will do."""
+    return _listed(positions, "or")
 
 
 def _band(row) -> str:
@@ -304,9 +309,26 @@ def _ranking(picks: dict, degraded: bool, covers_to: int | None) -> list[str]:
     ]
 
 
+def _hold(hold: dict | None) -> str | None:
+    """What is being kept off this list, when it comes back, and how to see it anyway.
+
+    All three, or none of them. A board short of two positions with nothing on screen to say so
+    reads as a board that has lost them — the same failure the hand-marked block was written for —
+    and a hold with no stated way past it is a wall rather than a default. The way past it is the
+    position filter that already exists, so the note names the thing to type.
+    """
+    if hold is None or not hold["positions"]:
+        return None
+    typed = _listed([f'"{position.lower()}"' for position in hold["positions"]], "or")
+    return (
+        f"  holding {_listed(hold['positions'], 'and')} until round {hold['from_round']}"
+        f" — type {typed} to see one"
+    )
+
+
 def _candidates(
     candidates: pd.DataFrame, picks: dict, limit: int, degraded: bool, covers_to: int | None,
-    position: str | None = None,
+    position: str | None = None, hold: dict | None = None,
 ) -> list[str]:
     """The board that is left, most expensive to pass on first, cut to what fits on a screen.
 
@@ -317,10 +339,12 @@ def _candidates(
     shown = candidates.head(limit)
     rule, note = _ranking(picks, degraded, covers_to)
     scope = f" ({position} only)" if position else ""
+    withheld = _hold(hold)
     lines = [
         "",
         f"Best available{scope} — {len(shown)} of {len(candidates)}{rule}",
         note,
+        *([withheld] if withheld else []),
         f"  {'#':>3}  {'POS':<5}{'PLAYER':<{_NAME_WIDTH}}{'TM':<5}{'BYE':>3}{'PoR':>9}"
         f"{'SURV':>7}{'COST':>9}",
     ]
@@ -352,6 +376,7 @@ def render_board(
     guidance: dict | None = None,
     position: str | None = None,
     cliffs: pd.DataFrame | None = None,
+    hold: dict | None = None,
 ) -> str:
     """The whole screen as one string.
 
@@ -381,6 +406,10 @@ def render_board(
     position whatever the board is narrowed to: depth is the reason to look away from the position
     being shown, so a narrowed screen reporting only that position's depth could never answer the
     question it is read for.
+
+    `hold` is what `held_positions` returned, or None for a screen holding nothing. The positions
+    it names are already gone from both `candidates` and `cliffs`; this is what puts the reason on
+    screen, so that a board with no kickers on it reads as a decision rather than as a loss.
     """
     marked = list(marked)
     lines = [_header(picks, league, marked)]
@@ -389,5 +418,5 @@ def render_board(
     lines += _roster(picks["roster"], league)
     lines += _guidance(guidance)
     lines += _cliffs(cliffs, league)
-    lines += _candidates(candidates, picks, limit, degraded, covers_to, position)
+    lines += _candidates(candidates, picks, limit, degraded, covers_to, position, hold)
     return "\n".join(lines)

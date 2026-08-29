@@ -625,3 +625,60 @@ def test_depth_sits_above_the_candidate_list_and_does_not_reorder_it():
 def available(out: str) -> str:
     """The candidate list out of one screen — the part the depth block must not touch."""
     return out.split("Best available")[-1]
+
+
+# Issue #58: saying that K and DST are being held off the board, rather than quietly dropping them.
+#
+# The subtraction itself belongs to `hold` and is tested there. What is asserted here is the half
+# that stops it being a loss: a board short of two positions with nothing on screen to say so reads
+# as a board that has lost them, which is the same failure the hand-marked block was written for.
+# The note has to name what is missing, when it comes back, and how to see it in the meantime —
+# the last of those is what makes a hard filter a default rather than a wall.
+
+
+def held(positions: list[str], from_round: int | None) -> dict:
+    """What `held_positions` returned, as the renderer takes it."""
+    return {"positions": positions, "from_round": from_round}
+
+
+# 42. What is missing and when it returns. Either half alone leaves a drafter checking a board he
+# has already been told not to trust.
+def test_the_screen_names_what_is_being_held_and_the_round_it_comes_back():
+    out = render_board(
+        candidates(), ingested(), LEAGUE, hold=held(["K", "DST"], 14)
+    )
+    note = line_naming(out, "holding")
+
+    assert "K" in note and "DST" in note
+    assert "14" in note
+
+
+# 43. And the way past it, because a filter with no way past it is a board that has lost them. The
+# escape hatch is the position filter that already exists, so the note is telling the drafter to
+# use a thing the tool can already do rather than describing a limitation.
+def test_the_screen_says_how_to_see_a_held_position_anyway():
+    out = render_board(
+        candidates(), ingested(), LEAGUE, hold=held(["K", "DST"], 14)
+    )
+    note = line_naming(out, "holding")
+
+    assert '"k"' in note and '"dst"' in note
+
+
+# 44. In the last rounds nothing is held, and the screen says nothing about holding — a note about
+# a hold that has lifted is a drafter re-reading a sentence that no longer applies.
+def test_a_screen_holding_nothing_says_nothing_about_holding():
+    assert "holding" not in render_board(candidates(), ingested(), LEAGUE)
+    assert "holding" not in render_board(
+        candidates(), ingested(), LEAGUE, hold=held([], None)
+    )
+
+
+# 45. Where it goes: with the rule the list was ranked by, which is the other thing on screen that
+# describes the list rather than a player in it.
+def test_the_hold_note_sits_with_the_candidate_list_rather_than_above_the_roster():
+    out = render_board(
+        candidates(), ingested(), LEAGUE, hold=held(["K", "DST"], 14)
+    )
+
+    assert out.index("Best available") < out.index("holding")

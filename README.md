@@ -415,7 +415,7 @@ sequence:
 On draft night, keep the Sleeper board on screen and refreshing as the picks come in:
 
 ```bash
-python -m src.draft.live              # the top 30 still available, redrawn as the draft moves
+python -m src.draft.live              # the top 15 still available, redrawn as the draft moves
 python -m src.draft.live --limit 50
 python -m src.draft.live --once       # draw it once and exit
 ```
@@ -432,6 +432,13 @@ once the
 rounds the plan table covers have passed. Nothing about it is hardcoded, which matters because the
 finding reverses between the two leagues: point it at the ESPN rows and it stops recommending
 quarterbacks.
+
+Kickers and defenses are held off that board until the last rounds, and so is the punter in the
+league that starts one. Cost of waiting cannot price them: it weighs one player's chance of being
+taken against the drop behind him, and every kicker is still sitting there ten rounds later. The
+reserve is one round per such slot the league starts, counted back from the end, so a fifteen-round
+league starting one of each shows them from round 14. Typing `k` or `dst` shows them at any point,
+and the board says it is holding them rather than quietly coming up short.
 
 Type a player's name at it to mark him taken by hand, and `-name` to take that back. Marks are held
 for the session and unioned with the picks Sleeper reports rather than replacing them, so the draft
