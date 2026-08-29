@@ -332,3 +332,36 @@ def test_a_degraded_result_says_it_has_fallen_back_to_value_ranking():
     assert "#180" in out
     # And it must not still claim to be ranking by a rule it no longer has the inputs for.
     assert "cost of waiting" not in out
+
+
+# Issue #36's render cases. A hand-marked player is off the board on the drafter's own say-so
+# rather than Sleeper's, and that is the one subtraction nothing else on screen can account for:
+# the header's pick count does not move for a mark, so a board short of two players would look
+# like a board that had lost them. Both cases below are about being able to see what was marked.
+
+
+def test_the_players_marked_by_hand_are_named_on_screen():
+    out = render_board(
+        candidates({"player_name": "Still There"}),
+        ingested(),
+        LEAGUE,
+        marked=[
+            {"player_id": "00-0000009", "player_name": "Gone Already", "position": "QB",
+             "team": "BUF"},
+            {"player_id": "00-0000010", "player_name": "Also Gone", "position": "RB",
+             "team": "ATL"},
+        ],
+    )
+    # Named rather than counted, for the same reason an unmatched pick is: a mistyped mark hides
+    # a player who is actually available, and the name is the only part of that a drafter can act
+    # on before his next pick.
+    assert "Gone Already" in out
+    assert "Also Gone" in out
+    # And the count belongs on the line that gets checked against the Sleeper app, because that
+    # line's "28 picks made" is not what this board has subtracted.
+    assert "2 by hand" in line_naming(out, "picks made")
+
+
+def test_a_draft_with_nothing_marked_by_hand_says_nothing_about_it():
+    out = render_board(candidates({"player_name": "Still There"}), ingested(), LEAGUE)
+    assert "hand" not in out.lower()

@@ -174,3 +174,107 @@ def test_the_loop_waits_the_configured_interval_between_polls():
 def test_an_interrupt_ends_the_loop_cleanly():
     written, _ = run([pick(1, "4034")])
     assert "stopped" in written[-1].lower()
+
+
+# Issue #36's loop cases: the drafter typing at the same line the status is repainting on.
+#
+# The pure half of hand-marking — which name resolves to which player, and what is refused — is
+# `test_draft_marks.py`'s. These are the half that only exists inside the loop: that a mark reaches
+# the board at all, that it stays there for the rest of the session, and that it still works on a
+# tick where Sleeper did not answer, which is the whole reason it exists.
+
+
+def typist(*batches):
+    """A keyboard handing back the lines typed since the last tick, one batch per tick."""
+    remaining = list(batches)
+
+    def keys():
+        return remaining.pop(0) if remaining else []
+
+    return keys
+
+
+def run_typed(*outcomes, typed, interval: float = 0.5):
+    """Drive `watch` with something typed at it, and give back everything it wrote."""
+    written = []
+    sleep, _ = ticker(len(outcomes))
+    watch(
+        CONTEXT, limit=5, poll=poller(*outcomes), sleep=sleep, now=clock(),
+        write=written.append, keys=typist(*typed), interval=interval,
+    )
+    return written
+
+
+# 18. The mark reaching the board, which is the whole feature: a player the API has not reported
+# is off the board because the drafter said so.
+def test_a_typed_name_marks_the_player_and_redraws_without_him():
+    written = run_typed([pick(1, "4034")], typed=[["bravo wideout"]])
+
+    drawn = boards(written)
+    assert len(drawn) == 1
+    assert "Bravo Wideout" not in drawn[0]
+
+
+# 19. A mark that lasted one tick would be worse than none: the drafter would have to retype it
+# every three seconds, and would not know it had lapsed.
+def test_a_mark_survives_the_refreshes_that_follow_it():
+    payload = [pick(1, "4034")]
+    written = run_typed(payload, payload, [*payload, pick(2, "8146")],
+                        typed=[["bravo wideout"], [], []])
+
+    for drawn in boards(written):
+        assert "Bravo Wideout" not in drawn
+
+
+# 20. Unioned with the API's picks, never instead of them — a mark that replaced them would put
+# thirteen other managers' picks back on the board.
+def test_a_mark_is_combined_with_the_picks_the_api_reports():
+    written = run_typed([pick(1, "4034")], typed=[["bravo wideout"]])
+
+    drawn = boards(written)[-1]
+    assert "Alpha Back" not in drawn
+    assert "Bravo Wideout" not in drawn
+    assert "Charlie Ender" in drawn
+
+
+# 21. A refusal has to be on screen. Typed at a line that repaints every three seconds, a name
+# that quietly did nothing reads exactly like a name that worked.
+def test_a_refused_name_draws_no_board_and_says_why():
+    payload = [pick(1, "4034")]
+    written = run_typed(payload, payload, typed=[[], ["nobody at all"]])
+
+    assert len(boards(written)) == 1
+    assert any("nobody at all" in chunk for chunk in written)
+
+
+# 22. The case the feature was built for. Sleeper has stopped answering, the draft has not stopped,
+# and the board still has to move.
+def test_a_mark_redraws_the_board_on_a_tick_the_poll_failed():
+    written = run_typed(
+        [pick(1, "4034")], requests.ConnectionError("connection reset"),
+        typed=[[], ["bravo wideout"]],
+    )
+
+    drawn = boards(written)
+    assert len(drawn) == 2
+    assert "Bravo Wideout" in drawn[0]
+    assert "Bravo Wideout" not in drawn[1]
+
+
+# 23. Enter on an empty line is how a drafter clears a half-typed name.
+def test_an_empty_line_changes_nothing():
+    payload = [pick(1, "4034")]
+    written = run_typed(payload, payload, typed=[[], ["", "   "]])
+
+    assert len(boards(written)) == 1
+
+
+# 24. The way back from a mistyped mark, without restarting the tool mid-draft.
+def test_an_unmark_puts_the_player_back_on_the_board():
+    payload = [pick(1, "4034")]
+    written = run_typed(payload, payload, typed=[["bravo wideout"], ["-bravo wideout"]])
+
+    drawn = boards(written)
+    assert len(drawn) == 2
+    assert "Bravo Wideout" not in drawn[0]
+    assert "Bravo Wideout" in drawn[1]
