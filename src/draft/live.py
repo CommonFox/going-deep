@@ -3,6 +3,7 @@
     python -m src.draft.live
     python -m src.draft.live --limit 50
     python -m src.draft.live --once
+    python -m src.draft.live --draft-id 1399447972411912192   # a mock, to rehearse on
 
 It resolves my seat from the draft order, reads the picks made so far, subtracts them from the
 board the warehouse built days ago, and prints what is left — then does that again every few
@@ -75,7 +76,11 @@ What it touches, exhaustively:
 ## Nothing is configured by typing
 
 The league ID and season come from `src.silver.sleeper`, so the repo holds one league ID rather
-than two that can disagree. A player's name and a position are the only things ever typed at this
+than two that can disagree. `--draft-id` is the single exception, and it is a draft to *watch*
+rather than a setting: a Sleeper mock carries `league_id: null` and appears in no league's draft
+list, so a rehearsal cannot be reached any other way. It is also the only way the draft on screen
+can be a different shape from the board it is read against, so `prepare` checks the two agree —
+see `seat.check_priced_for`. A player's name and a position are the only things ever typed at this
 tool, and both are resolved against the board rather than configuring anything: one says a player
 is gone, the other says which part of the board to look at, and neither changes a number.
 Everything else — seat, roster, team count, rounds, starting slots — is read out of the draft
@@ -112,7 +117,7 @@ from src.draft.marks import combine, read_mark
 from src.draft.picks import ingest_picks, picks_made
 from src.draft.refresh import fingerprint, status_line
 from src.draft.render import render_board
-from src.draft.seat import resolve_seat
+from src.draft.seat import check_priced_for, resolve_seat
 from src.draft.waiting import rank_by_cost_of_waiting
 from src.query import WAREHOUSE_PATH, q
 from src.silver.sleeper import LEAGUE_ID, SEASON, select_draft
@@ -284,20 +289,63 @@ def load_plans(league_key: str = LEAGUE_KEY) -> pd.DataFrame:
     return plans
 
 
-def prepare() -> dict:
+def load_priced_shape(league_key: str = LEAGUE_KEY) -> dict:
+    """The league shape this board's numbers were priced for, as the build recorded it.
+
+    Read so `check_priced_for` has something to compare a hand-given draft against. The spelling
+    is translated here, at the warehouse boundary, for the same reason `load_survival` renames its
+    column there: nothing above this line should have to know that `league_settings` writes the
+    superflex slot `superflex_slots` while a draft record writes it `slots_super_flex`.
+    """
+    settings = q(
+        """
+        SELECT team_count, qb_slots, rb_slots, wr_slots, te_slots, flex_slots,
+               superflex_slots, k_slots, p_slots, dst_slots
+        FROM league_settings
+        WHERE league_key = ?
+        """,
+        [league_key],
+    )
+    if settings.empty:
+        raise RuntimeError(
+            f"league_settings holds no row for league {league_key!r}, so there is nothing to "
+            "check a draft against. Run scripts/build_warehouse.sh."
+        )
+    row = settings.iloc[0]
+    slots = {
+        "QB": row["qb_slots"], "RB": row["rb_slots"], "WR": row["wr_slots"],
+        "TE": row["te_slots"], "FLEX": row["flex_slots"],
+        "SUPER_FLEX": row["superflex_slots"], "K": row["k_slots"],
+        "P": row["p_slots"], "DST": row["dst_slots"],
+    }
+    return {
+        "team_count": int(row["team_count"]),
+        # Absent rather than zero, matching what `seat._slots` builds from the other side.
+        "slots": {slot: int(n) for slot, n in slots.items() if int(n or 0) > 0},
+    }
+
+
+def prepare(draft_id: str | None = None) -> dict:
     """Everything that cannot change once the draft is under way, read once.
 
     The board and the survival frame were computed by a rebuild days ago; the draft record and the
     seat were settled when the order was drawn. Nothing on the night moves any of them, so the
     loop above carries this rather than re-reading it — see the module docstring on the file lock.
+
+    `draft_id` names a draft directly instead of finding this season's through the league. That is
+    the only way to reach a Sleeper mock, which carries `league_id: null` and so appears in no
+    league's draft list. It is also the only way the draft on screen can disagree with the board it
+    is read against, which is why `check_priced_for` runs below.
     """
-    draft = find_draft(LEAGUE_ID, SEASON)
+    draft = _get(f"/draft/{draft_id}") if draft_id else find_draft(LEAGUE_ID, SEASON)
+    league = resolve_seat(draft, user_id(USERNAME))
+    check_priced_for(league, load_priced_shape())
     return {
         "board": load_board(),
         "survival": load_survival(),
         "plans": load_plans(),
         "draft": draft,
-        "league": resolve_seat(draft, user_id(USERNAME)),
+        "league": league,
     }
 
 
@@ -373,9 +421,11 @@ def starting_position(typed: str | None, board: pd.DataFrame) -> str | None:
     return outcome["position"]
 
 
-def render_once(limit: int = DEFAULT_LIMIT, position: str | None = None) -> str:
+def render_once(
+    limit: int = DEFAULT_LIMIT, position: str | None = None, draft_id: str | None = None
+) -> str:
     """Everything, once: fetch, resolve, subtract, rank, and give back the screen."""
-    context = prepare()
+    context = prepare(draft_id)
     return screen(
         context, fetch_picks(context), limit,
         position=starting_position(position, context["board"]),
@@ -533,17 +583,22 @@ def watch(
         write(f"\n\nstopped at {made} picks made — no pick was ever submitted\n")
 
 
-def main(limit: int = DEFAULT_LIMIT, once: bool = False, position: str | None = None) -> None:
+def main(
+    limit: int = DEFAULT_LIMIT,
+    once: bool = False,
+    position: str | None = None,
+    draft_id: str | None = None,
+) -> None:
     built_at = warehouse_built_at()
     check_recency(built_at, datetime.now())
     built = f"board built {built_at:%Y-%m-%d %H:%M} — read-only, no pick is ever submitted"
 
     if once:
-        print(render_once(limit, position))
+        print(render_once(limit, position, draft_id))
         print(f"\n{built}")
         return
 
-    context = prepare()
+    context = prepare(draft_id)
     print(
         f"{built}\nrefreshing every {REFRESH_SECONDS:.0f}s — type a position to show only it "
         f'("qb", "{ALL}" for everyone), a name to mark him taken by hand, -name to undo, '
@@ -568,10 +623,15 @@ if __name__ == "__main__":
         "--position", default=None,
         help="show only one position (QB, RB, ...); can be changed by typing at the running tool",
     )
+    parser.add_argument(
+        "--draft-id",
+        help="watch this draft instead of the league's — the only way to reach a Sleeper mock, "
+             "which belongs to no league. Refused unless its settings match the board's league.",
+    )
     arguments = parser.parse_args()
 
     try:
-        main(arguments.limit, arguments.once, arguments.position)
+        main(arguments.limit, arguments.once, arguments.position, arguments.draft_id)
     except KeyboardInterrupt:
         # Ctrl-C before the loop starts — during the warehouse read or the first fetch. The loop
         # has its own, which stops cleanly rather than unwinding.
