@@ -534,3 +534,83 @@ def test_narrowing_the_board_leaves_the_roster_and_the_opening_shape_alone():
 
     assert section(narrowed, "My roster") == section(full, "My roster")
     assert section(narrowed, "Opening shape") == section(full, "Opening shape")
+
+
+def cliffs(*rows: tuple) -> pd.DataFrame:
+    """What `position_cliffs` hands over: one row per position still on the board."""
+    return pd.DataFrame(
+        [
+            {"position": position, "above": above, "drop": drop, "remaining": left}
+            for position, above, drop, left in rows
+        ],
+        columns=["position", "above", "drop", "remaining"],
+    )
+
+
+# Issue #29, user story 18: how many are left before the next real drop, position by position.
+#
+# The block answers a question the ranking cannot, because the ranking hands back one number per
+# player and the eye reading the top of it sees whichever positions happen to rank highest. So
+# what is asserted here is that the two numbers a drafter compares — the count above the cliff and
+# the size of the drop — are both on the line, and that the block reads in the order the rest of
+# the screen already uses.
+
+
+# 37. Both numbers, because either alone is unreadable: three left is fine behind a four-point
+# step and an emergency behind a forty-point one.
+def test_each_position_shows_how_many_are_left_above_the_drop_and_how_big_it_is():
+    out = render_board(
+        candidates(), ingested(), LEAGUE,
+        cliffs=cliffs(("QB", 3, 80.4, 12), ("RB", 6, 8.2, 41)),
+    )
+    passer = line_naming(out, "QB ")
+
+    assert "3" in passer and "80.4" in passer
+
+
+# 38. The count of who is left at all, beside the count above the cliff. "3 of 4" and "3 of 40"
+# are different boards, and the first number is the same in both.
+def test_a_position_shows_how_many_are_left_at_it_in_total():
+    out = render_board(
+        candidates(), ingested(), LEAGUE, cliffs=cliffs(("QB", 3, 80.4, 12))
+    )
+    assert "12" in line_naming(out, "QB ")
+
+
+# 39. The same order the roster block reads in. A block whose rows moved between ticks would be
+# re-read from the top every time, which is the opposite of at a glance.
+def test_the_positions_read_in_the_order_the_league_starts_them():
+    out = render_board(
+        candidates(), ingested(), LEAGUE,
+        cliffs=cliffs(("DST", 1, 5.0, 20), ("RB", 6, 8.2, 41), ("QB", 3, 80.4, 12)),
+    )
+    rows = section(out, "Depth")
+
+    assert [row.split()[0] for row in rows] == ["QB", "RB", "DST"]
+
+
+# 40. A screen with nothing to say about depth says nothing, rather than an empty heading.
+def test_a_screen_with_no_cliffs_says_nothing_about_depth():
+    assert "Depth" not in render_board(candidates(), ingested(), LEAGUE)
+    assert "Depth" not in render_board(candidates(), ingested(), LEAGUE, cliffs=cliffs())
+
+
+# 41. Beside the ranking, above it, and changing nothing about it — the same rule the opening
+# shape follows, for the same reason: a drafter has to be able to overrule what he is shown.
+def test_depth_sits_above_the_candidate_list_and_does_not_reorder_it():
+    rows = [
+        {"player_id": "00-0000001", "player_name": "A Passer", "position": "QB"},
+        {"player_id": "00-0000002", "player_name": "A Back", "position": "RB"},
+    ]
+    plain = render_board(candidates(*rows), ingested(), LEAGUE)
+    with_depth = render_board(
+        candidates(*rows), ingested(), LEAGUE, cliffs=cliffs(("QB", 3, 80.4, 12))
+    )
+
+    assert with_depth.index("Depth") < with_depth.index("Best available")
+    assert available(with_depth) == available(plain)
+
+
+def available(out: str) -> str:
+    """The candidate list out of one screen — the part the depth block must not touch."""
+    return out.split("Best available")[-1]
