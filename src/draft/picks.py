@@ -29,6 +29,32 @@ The second is exactly the failure the whole feature exists to prevent, and it co
 unmatched pick is never dropped, never guessed at, and is returned named so the renderer can put
 it on screen. `sleeper_ids.report_unmapped` is the same instinct applied days earlier.
 
+## Whose pick it is, and why that takes two fields
+
+A pick carries `roster_id`, which is the roster it lands on, and `draft_slot`, which is the seat
+that held it. In this league those are not the same number, and `roster_id` is the one that stays
+right under a **traded pick**: the seat is whoever originally held the pick, the roster is whoever
+actually made it.
+
+So `roster_id` decides it — except that a Sleeper **mock** has no league behind it, so there are no
+rosters, and every pick comes back with `roster_id: null`. All 210 of them, in the mock this was
+found in. The draft record still carries a `slot_to_roster_id` (an identity map), so `resolve_seat`
+returns a roster ID quite happily and nothing refuses; it is simply a number no pick will ever
+match. My roster then stays empty for a whole draft, and `composition`, which reads `mine`,
+believes no opening picks have been made and keeps recommending the opening band at pick 197.
+
+Hence: `roster_id` when the pick carries one, `draft_slot == seat` when it does not. That order
+matters and is not interchangeable. Reading the seat first would attribute a traded pick to the
+manager who used to hold it, silently, which is the same shape of failure `seat.py`'s docstring
+warns about for `draft_order` and `slot_to_roster_id`.
+
+The fallback cannot do everything the primary does: in a mock with pick trading on, a pick traded
+between seats is attributed to the seat that held it, because a mock carries nothing that says
+otherwise. That is the limit of what a league-less draft can support, not a decision taken here.
+
+A hand-marked player carries neither field, and so is never mine — which is exactly what `marks`
+promises. A mark says a player is gone, never whose he is.
+
 ## Snake arithmetic
 
 Rounds alternate direction, so a seat's pick number depends on the round's parity:
@@ -108,6 +134,20 @@ def _picked_name(entry: dict) -> str | None:
     metadata = entry.get("metadata") or {}
     parts = [metadata.get("first_name"), metadata.get("last_name")]
     return " ".join(part for part in parts if part) or None
+
+
+def _is_mine(entry: dict, league: dict) -> bool:
+    """Whether one pick belongs to the drafter — by roster where there is one, else by seat.
+
+    See the module docstring for why the order is this way round and not the other: `roster_id` is
+    what survives a traded pick, and `draft_slot` is all a mock has.
+    """
+    roster_id = entry.get("roster_id")
+    if roster_id is not None:
+        return roster_id == league["roster_id"]
+
+    draft_slot = entry.get("draft_slot")
+    return draft_slot is not None and draft_slot == league["seat"]
 
 
 def picks_made(picks: list[dict]) -> int:
@@ -234,7 +274,7 @@ def ingest_picks(picks: list[dict], board: pd.DataFrame, league: dict) -> dict:
             continue
 
         taken.add(row["player_id"])
-        if entry.get("roster_id") == league["roster_id"]:
+        if _is_mine(entry, league):
             mine.append(row)
 
     made = picks_made(ordered)
