@@ -31,11 +31,12 @@ opposite thing, which is the property worth having rather than the answer.
 
 ## Bands, and why nothing finer is offered
 
-The plan table records trials but no dispersion, so the difference between the leading
-compositions cannot be told apart from simulation noise — the top several sit within about twenty
-points of one another over three hundred trials. What is *not* close is the band structure
-underneath them: quarterback count across the opening moves the outcome by roughly a hundred
-points and triples the win rate, monotonically.
+The plan table records the spread behind each of its means, and what that spread says is that the
+leading compositions mostly cannot be told apart: at ten of this league's fourteen seats the best
+two openings finish within one combined standard error of each other over three hundred trials,
+and at only three is the leader clear by more than two. In the other league it is all ten seats.
+What is *not* close is the band structure underneath them: quarterback count across the opening
+moves the outcome by roughly a hundred points and triples the win rate, monotonically.
 
 A **band** is therefore every open plan sharing one position's count — "the openings that take two
 quarterbacks" — scored as the mean of its members. Coarse enough to survive the noise, and the

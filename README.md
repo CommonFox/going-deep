@@ -426,8 +426,9 @@ what waiting for it would cost, and shows the roster so far and the next overall
 Beside that ranking it shows which roster shapes the opening is still on track for, read from
 `draft_plans` for this league and this seat at run time. Cost of waiting looks one pick ahead at
 one player, so it cannot see the roster being assembled; this is the half that can. It is stated
-as position-count bands rather than as a named opening — the plan table records no dispersion, so
-the leading compositions cannot be told apart from simulation noise — and it is withdrawn once the
+as position-count bands rather than as a named opening — the plan table records the standard error
+behind each mean, and at most seats the leading compositions sit inside it — and it is withdrawn
+once the
 rounds the plan table covers have passed. Nothing about it is hardcoded, which matters because the
 finding reverses between the two leagues: point it at the ESPN rows and it stops recommending
 quarterbacks.
