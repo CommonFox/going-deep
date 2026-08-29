@@ -11,6 +11,7 @@ something that has to be eyeballed on a draft night to know whether it is right.
     marked by hand                     short, and only when there is one
     my roster                          short, and answers "what do I still need"
     opening shape                      short, and answers "what am I still on track for"
+    depth to the next cliff            short, and answers "is this position thin or deep"
     best available                     the long list, last
 
 The order is the only real decision here, and it is decided by what a wrong screen costs. An
@@ -29,6 +30,10 @@ the roster rather than about a player, so it belongs with the roster; and it mus
 ranking rather than inside it, because the ranking is the recommendation and this is the thing a
 drafter overrules it with. A column of it on a candidate row would fold the two together and leave
 neither auditable — which is the same reason the repo keeps a blended metric's inputs visible.
+
+The depth block sits directly above the board for the same two reasons pointing the other way: it
+is a claim about the board rather than about the roster, and it is read *while* reading the list,
+as the thing that says a position is thinner than the rows at the top of the screen suggest.
 
 ## Missing values print as gaps, never as values
 
@@ -246,6 +251,33 @@ def _guidance(guidance: dict | None) -> list[str]:
     return lines
 
 
+def _cliffs(cliffs: pd.DataFrame | None, league: dict) -> list[str]:
+    """How many are left at each position before the next drop, or nothing at all.
+
+    Both numbers per position, because either alone is unreadable: three left is comfortable
+    behind a four-point step and an emergency behind a forty-point one.
+
+    Ordered by the slots the league starts, which is the order the roster block above already
+    reads in — a block whose rows moved between ticks would be re-read from the top every time,
+    which is the opposite of at a glance. Anything the league does not start goes last, in the
+    order `position_cliffs` returned it.
+    """
+    if cliffs is None or cliffs.empty:
+        return []
+
+    slots = list(league["slots"])
+    order = cliffs["position"].map(
+        lambda position: slots.index(position) if position in slots else len(slots)
+    )
+    lines = ["", "Depth to the next cliff"]
+    for row in cliffs.assign(_order=order).sort_values("_order", kind="stable").itertuples():
+        lines.append(
+            f"  {row.position:<6}{row.above:>3} above a {row.drop:>6.1f} drop"
+            f"  ·  {row.remaining:>3} left"
+        )
+    return lines
+
+
 def _ranking(picks: dict, degraded: bool, covers_to: int | None) -> list[str]:
     """How the list below was ordered, and — when it is not the good rule — why not.
 
@@ -319,6 +351,7 @@ def render_board(
     marked: list[dict] | tuple = (),
     guidance: dict | None = None,
     position: str | None = None,
+    cliffs: pd.DataFrame | None = None,
 ) -> str:
     """The whole screen as one string.
 
@@ -342,6 +375,12 @@ def render_board(
     `position` is the position the board has been narrowed to, or None for the whole board. It
     names the scope of the candidate list and touches nothing above it — the roster, the warning
     and the opening shape are claims about the draft, not about what the drafter is looking at.
+
+    `cliffs` is what `position_cliffs` returned, or None for a screen without it. Like the opening
+    shape it sits beside the ranking and reorders nothing, and like the ranking it covers every
+    position whatever the board is narrowed to: depth is the reason to look away from the position
+    being shown, so a narrowed screen reporting only that position's depth could never answer the
+    question it is read for.
     """
     marked = list(marked)
     lines = [_header(picks, league, marked)]
@@ -349,5 +388,6 @@ def render_board(
     lines += _marked(marked)
     lines += _roster(picks["roster"], league)
     lines += _guidance(guidance)
+    lines += _cliffs(cliffs, league)
     lines += _candidates(candidates, picks, limit, degraded, covers_to, position)
     return "\n".join(lines)

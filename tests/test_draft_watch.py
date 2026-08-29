@@ -351,3 +351,18 @@ def test_a_typed_position_narrows_the_board_on_a_tick_the_poll_failed():
     assert len(drawn) == 2
     assert "Charlie Ender" not in available(drawn[1])
     assert "Bravo Wideout" in available(drawn[1])
+
+
+# 29. Issue #29, user stories 17 and 18 meeting. Depth is the reason to look away from the
+# position being shown, so narrowing the board must not narrow it: a screen showing quarterbacks
+# that reported only quarterback depth could never answer "should I be taking a back instead".
+def test_depth_covers_every_position_even_when_the_board_is_narrowed_to_one():
+    payload = [pick(1, "4034")]
+    written = run_typed(payload, payload, typed=[[], ["wr"]])
+
+    narrowed = boards(written)[1]
+    assert "Depth" in narrowed, "the narrowed board reported no depth at all"
+    depth = narrowed.split("Depth")[1].split("Best available")[0]
+
+    assert "Charlie Ender" not in available(narrowed)
+    assert "WR" in depth and "TE" in depth

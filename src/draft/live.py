@@ -54,9 +54,10 @@ not revisited under a pick clock.
 
 ## This module is the edge, and the only part of `src/draft/` that is
 
-`picks`, `candidates`, `seat`, `composition`, `filter` and `render` are all pure: frames and
-payloads in, frames and strings out. Everything that touches the world is here, in one file, so that "does this tool
-write anything" is a question answered by reading one module rather than four.
+`picks`, `candidates`, `seat`, `composition`, `cliff`, `filter` and `render` are all pure: frames
+and payloads in, frames and strings out. Everything that touches the world is here, in one file,
+so that "does this tool write anything" is a question answered by reading one module rather than
+four.
 
 What it touches, exhaustively:
 
@@ -103,6 +104,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
+from src.draft.candidates import rank_candidates
+from src.draft.cliff import position_cliffs
 from src.draft.composition import composition_guidance
 from src.draft.filter import ALL, read_position
 from src.draft.marks import combine, read_mark
@@ -334,10 +337,17 @@ def screen(
     # Beside the ranking, never in it: the guidance is read from the plan table and says what a
     # position keeps open or closes off, and the order below it is the same order either way.
     guidance = composition_guidance(context["plans"], result, context["league"])
+
+    # Depth is computed from the unnarrowed board on purpose, which is why it is ranked again here
+    # rather than read off `ranked`. It is the reason to look away from the position being shown,
+    # so a screen filtered to quarterbacks that reported only quarterback depth could never answer
+    # the question it is read for. The second pass is a sort over a few hundred rows.
+    cliffs = position_cliffs(rank_candidates(context["board"], result["taken"]))
+
     return render_board(
         candidates, result, context["league"], limit,
         degraded=ranked["degraded"], covers_to=ranked["covers_to"], marked=marked,
-        guidance=guidance, position=position,
+        guidance=guidance, position=position, cliffs=cliffs,
     )
 
 

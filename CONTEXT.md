@@ -126,3 +126,12 @@ would be left at his position, so a deep position is cheap to wait on even when 
 player is likely to go, and a cliff is expensive even when he will probably last. Zero at the
 turn, where the two picks are adjacent and there is no gap to survive.
 _Avoid_: urgency, opportunity cost, need (that is a roster question, not a supply one)
+
+**Cliff**:
+The largest drop in points over replacement between two consecutive players still available at a
+position, looked for among the next few rather than the whole remaining tail. How many sit above
+it is what says a position is thin or deep — a fact about the position, where **cost of waiting**
+is a fact about a player. Below the last player at a position the drop is his own points over
+replacement, because replacement level is zero by construction.
+_Avoid_: tier (already spent on an offensive line's grade), run (that is what a room does, not
+what a board looks like)
