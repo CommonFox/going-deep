@@ -197,8 +197,9 @@ def _band(row) -> str:
 def _guidance(guidance: dict | None) -> list[str]:
     """What the opening is still on track for, beside the ranking and never inside it.
 
-    Bands rather than plans, because the plan table records no dispersion and the leading
-    compositions cannot be told apart from simulation noise. Every open band is printed, not only
+    Bands rather than plans, because the leading compositions cannot be told apart from simulation
+    noise — the plan table records the standard error behind every mean, and at most seats the top
+    two openings sit inside it. Every open band is printed, not only
     the best one: being warned away from a shape that scored badly is half of what this is for,
     and a leader on its own does not say what the alternatives cost.
 

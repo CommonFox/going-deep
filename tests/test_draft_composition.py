@@ -28,9 +28,9 @@ two-quarterback openings would tie with the quarterback band it is really just r
 
 *Plan*, *composition* and *band*, as the glossary has them: a plan is a claim about the opening, a
 composition is that plan stated as counts, and a band is every composition sharing one position's
-count. The guidance never names a composition — the plan table records trials but no dispersion,
-so the leading compositions cannot be told apart from simulation noise, and only the coarse band
-structure underneath them is real enough to show.
+count. The guidance never names a composition — the plan table's recorded dispersion puts the
+leading compositions inside each other's noise at most seats, and only the coarse band structure
+underneath them is real enough to show.
 """
 
 import pandas as pd

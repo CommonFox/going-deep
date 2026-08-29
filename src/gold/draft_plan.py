@@ -58,6 +58,16 @@ caps, same hindsight-optimal lineup scoring, same treatment of the superflex slo
 flex eligibility. The only differences are that the board is projected rather than historical, the
 order is sampled rather than fixed, and the focal seat is a specific slot rather than every slot
 averaged together.
+
+## How much of a gap is real
+
+A mean over three hundred sampled rooms is a number with noise on it, and two openings twenty
+points apart may be two openings twenty points apart or the same opening priced twice. So each
+point mean is written with the spread behind it: a standard deviation, which is how far one room
+moves this plan and therefore what it risks, and a standard error, which is how firmly the mean
+itself is pinned down and therefore what a gap has to clear to be believed. `_summarize_plans` has
+the arithmetic and the one caveat — the comparison between two plans is paired, so combining two
+rows' standard errors is a conservative test rather than an exact one.
 """
 
 from pathlib import Path
@@ -99,7 +109,8 @@ _OUTPUT_COLUMNS = [
 ]
 
 # Simulated drafts per (league, slot, plan). The spread across plans is a few points wide, so this
-# has to be large enough that the standard error of a plan's mean is well under that gap.
+# has to be large enough that the standard error of a plan's mean is well under that gap — which
+# each row now records, so the count is answerable from the table rather than taken on trust.
 _TRIALS = 300
 
 # Fixed so a rebuild reproduces byte-for-byte, and shared across plans within a trial so every plan
@@ -107,7 +118,9 @@ _TRIALS = 300
 _SEED = 20260903
 
 _PLAN_COLUMNS = [
-    "league_key", "draft_slot", "plan", "trials", "starter_points", "points_vs_field",
+    "league_key", "draft_slot", "plan", "trials",
+    "starter_points", "starter_points_stdev", "starter_points_stderr",
+    "points_vs_field", "points_vs_field_stdev", "points_vs_field_stderr",
     "finish_rank", "win_rate", "top_third_rate",
 ]
 
@@ -328,15 +341,42 @@ def simulate_first_pick(
 
 
 def _summarize_plans(results: pd.DataFrame, n_teams: int) -> pd.DataFrame:
-    """One row per (seat, plan): how it did across every room it was drafted into."""
+    """One row per (seat, plan): how it did across every room it was drafted into, and how widely.
+
+    Each point mean carries two numbers beside it. The **standard deviation** is how far a single
+    room moved this plan's result, which is the plan's risk: two openings can average the same and
+    reach it very differently. The **standard error** is that spread divided by the root of the
+    trial count, which is how precisely the mean itself is pinned down, and it is the number that
+    answers whether two plans finished apart or finished level twice.
+
+    A plan simulated once gets neither rather than a zero: one room cannot measure a spread, and a
+    zero there would read as certainty.
+
+    Two plans are separated when the gap between their means clears the root of the sum of their
+    squared standard errors. That test is *conservative* here, and deliberately so. Every plan
+    within a trial faces the identical room, so the honest comparison is paired, and the pairing is
+    worth a great deal: the leading openings correlate at about 0.7 across rooms, which makes the
+    true standard error of their difference roughly half what combining the two rows implies. No
+    number on a row can carry that, because it belongs to the pair rather than to either plan. So a
+    gap that clears the combined error is real, and one that does not may still be.
+    """
     grouped = results.groupby(["draft_slot", "plan"], as_index=False).agg(
         trials=("starter_points", "size"),
         starter_points=("starter_points", "mean"),
+        starter_points_stdev=("starter_points", "std"),
         points_vs_field=("points_vs_field", "mean"),
+        points_vs_field_stdev=("points_vs_field", "std"),
         finish_rank=("finish_rank", "mean"),
         win_rate=("finish_rank", lambda ranks: (ranks == 1).mean()),
         top_third_rate=("finish_rank", lambda ranks: (ranks <= n_teams / 3).mean()),
     )
+
+    # The rates get no column of their own: the standard error of a proportion is exactly
+    # sqrt(p(1-p)/trials) from the two numbers already on the row, and storing a third would be a
+    # second place for the same fact to be wrong.
+    root = np.sqrt(grouped["trials"])
+    for column in ("starter_points", "points_vs_field"):
+        grouped[f"{column}_stderr"] = grouped[f"{column}_stdev"] / root
     return grouped
 
 
