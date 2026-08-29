@@ -108,7 +108,7 @@ from src.draft.render import render_board
 from src.draft.seat import resolve_seat
 from src.draft.waiting import rank_by_cost_of_waiting
 from src.query import WAREHOUSE_PATH, q
-from src.silver.sleeper import LEAGUE_ID, SEASON
+from src.silver.sleeper import LEAGUE_ID, SEASON, select_draft
 
 BASE_URL = "https://api.sleeper.app/v1"
 
@@ -187,16 +187,12 @@ def find_draft(league_id: str, season: int) -> dict:
     Two calls, deliberately. The league's draft list carries the draft order but *not*
     `slot_to_roster_id`, so the record has to be fetched by ID to learn which roster a seat's
     picks land on — and without that, my own picks cannot be told from anyone else's.
-    """
-    drafts = [
-        draft for draft in _get(f"/league/{league_id}/drafts")
-        if str(draft.get("season")) == str(season)
-    ]
-    if not drafts:
-        raise RuntimeError(f"League {league_id} has no {season} draft.")
 
-    # Newest first, for the case where a league has a redrafted or restarted draft on record.
-    newest = max(drafts, key=lambda draft: draft.get("created") or 0)
+    Which of the league's drafts is this season's is `src.silver.sleeper`'s rule, read from there
+    rather than restated here. That module archives the picks once the draft is done, and a tool
+    watching one draft while the archive kept another is a disagreement neither screen would show.
+    """
+    newest = select_draft(_get(f"/league/{league_id}/drafts"), season)
     return _get(f"/draft/{newest['draft_id']}")
 
 

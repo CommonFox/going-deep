@@ -87,6 +87,79 @@ def load_users(raw_path: Path) -> None:
     _load_json_to_table(raw_path, "sleeper_users")
 
 
+def select_draft(drafts: list[dict], season) -> dict:
+    """This season's draft, out of every draft the league has on record.
+
+    Pure, and shared with `src.draft.live`, which watches the draft this picks out. The two
+    choosing differently would mean the tool drafting from one draft while the archive kept
+    another, which is a disagreement neither screen would show.
+
+    Sleeper spells the season as a string and everything here holds an int, so both are compared
+    as strings. Where a season has more than one draft — a league that restarted or redrafted
+    keeps the abandoned one on record beside the real one — the newest wins.
+    """
+    this_season = [
+        draft for draft in drafts if str(draft.get("season")) == str(season)
+    ]
+    if not this_season:
+        raise RuntimeError(
+            f"No {season} draft among the {len(drafts)} this league has on record."
+        )
+    return max(this_season, key=lambda draft: draft.get("created") or 0)
+
+
+def _draft_id(league_id: str, season: int) -> str:
+    """The ID of this season's draft, which both fetches below are keyed on."""
+    return select_draft(_get(f"/league/{league_id}/drafts"), season)["draft_id"]
+
+
+def fetch_draft(league_id: str, season: int) -> Path:
+    """Fetch this season's draft record whole and save raw to JSON.
+
+    Two calls, because the league's draft list is not the record: it carries the season and the
+    created time `select_draft` chooses on, but not `slot_to_roster_id` or the settings, and those
+    are what say how many teams and rounds the draft ran and which roster each seat's picks landed
+    on. The archive keeps the fuller one.
+
+    Named by draft ID rather than league ID, unlike every other file here, because a league drafts
+    again next season: keying on the draft means each year's record lands beside the last rather
+    than over it.
+    """
+    record = _get(f"/draft/{_draft_id(league_id, season)}")
+    return _save_raw_json([record], f"draft_{record['draft_id']}")
+
+
+def load_draft(raw_path: Path) -> None:
+    _load_json_to_table(raw_path, "sleeper_draft")
+
+
+def fetch_draft_picks(league_id: str, season: int) -> Path:
+    """Fetch every pick made in this season's draft and save raw to JSON.
+
+    This is the archive step the live draft tool deliberately does not do. `src.draft.live` polls
+    this same endpoint every few seconds for two hours and writes none of it, because that would
+    be thousands of near-identical files; the picks are archived once, from here, after the draft.
+    """
+    draft_id = _draft_id(league_id, season)
+    return _save_raw_json(_get(f"/draft/{draft_id}/picks"), f"draft_picks_{draft_id}")
+
+
+def load_draft_picks(raw_path: Path) -> None:
+    """Load the archived picks into the warehouse, taking the payload's own shape.
+
+    Nothing is projected out by hand here, unlike `load_projections` below. These picks have never
+    been seen — this league has drafted once, in a draft that has not been made yet — so a written
+    column list would be a guess against a payload nobody has read, and a wrong guess in one would
+    load as nulls rather than fail. `json_normalize` takes whatever Sleeper sends, and the raw file
+    beside it stays the source of truth either way.
+
+    Before the draft the payload is an empty list and the table is dropped with a note, rather than
+    created with a schema invented to fill the gap. So `sleeper_draft_picks` exists from the first
+    pick onwards and not before, which is the honest answer to "what did this league draft".
+    """
+    _load_json_to_table(raw_path, "sleeper_draft_picks")
+
+
 def fetch_matchups(league_id: str, weeks: list[int]) -> Path:
     """Fetch weekly matchups (starters, points, roster_id) and save raw to JSON."""
     rows = []
@@ -224,6 +297,8 @@ if __name__ == "__main__":
     load_league(fetch_league(LEAGUE_ID))
     load_rosters(fetch_rosters(LEAGUE_ID))
     load_users(fetch_users(LEAGUE_ID))
+    load_draft(fetch_draft(LEAGUE_ID, SEASON))
+    load_draft_picks(fetch_draft_picks(LEAGUE_ID, SEASON))
     load_matchups(fetch_matchups(LEAGUE_ID, WEEKS))
     load_transactions(fetch_transactions(LEAGUE_ID, WEEKS))
     load_nfl_state(fetch_nfl_state())
