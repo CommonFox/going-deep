@@ -354,3 +354,122 @@ def test_my_own_picks_are_reported_in_draft_order_with_their_positions():
         "My Receiver", "My Quarterback"
     ]
     assert [player["position"] for player in result["mine"]] == ["WR", "QB"]
+
+
+# Issue #59: through a whole 210-pick mock the roster panel stayed empty, because every pick in a
+# mock carries `roster_id: null`. There is no league behind a mock, so there are no rosters for
+# picks to land on — but `slot_to_roster_id` is still populated (an identity map), so `resolve_seat`
+# returns a roster ID that nothing will ever match. `draft_slot` is populated on every mock pick
+# and identifies the seat, so it is the fallback.
+#
+# It is emphatically the fallback and not the primary. `roster_id` is what survives a **traded
+# pick**: when a pick has been traded, `draft_slot` is the seat that originally held it and
+# `roster_id` is the manager who actually made it. Reading `draft_slot` first would hand a traded
+# pick to the wrong manager, quietly. Case D below is the one that pins the precedence down.
+
+
+def mock_pick(sleeper_id: str, pick_no: int, draft_slot: int, **metadata) -> dict:
+    """One pick as a Sleeper *mock* hands it back: no roster at all, the seat in `draft_slot`.
+
+    Verified against every one of the 210 picks of mock draft 1399447972411912192, where
+    `roster_id` is null throughout and the fifteen picks at `draft_slot` 1 are exactly seat 1's
+    snake sequence — 1, 28, 29, 56, 57 and so on.
+    """
+    return {**pick(sleeper_id, pick_no, roster_id=None, **metadata), "draft_slot": draft_slot}
+
+
+MY_SEAT = 1
+ANOTHER_SEAT = 7
+
+
+# C1. A pick carrying my roster ID is mine, whatever seat it came from. Unchanged behaviour,
+#     restated here because the fallback must not disturb it.
+def test_a_pick_carrying_my_roster_id_is_still_mine():
+    result = ingest_picks(
+        [pick("4034", pick_no=1, roster_id=MY_ROSTER)],
+        board(ONE_BACK),
+        league(seat=MY_SEAT, roster_id=MY_ROSTER),
+    )
+
+    assert [player["player_name"] for player in result["mine"]] == ["My Back"]
+    assert players_in(result["roster"], "RB") == ["My Back"]
+
+
+# C2. A pick with no roster ID at all, made from my seat, is mine.
+#
+#     This is the mock, and the whole symptom: fifteen picks made from seat 1 and a roster panel
+#     that stayed empty for all 210. `mine` is asserted as well as the roster frame because it is
+#     what `composition_guidance` reads — an empty `mine` is what had it recommending the opening
+#     band at pick 197.
+def test_a_pick_with_no_roster_id_from_my_seat_is_mine():
+    result = ingest_picks(
+        [
+            mock_pick("4034", pick_no=1, draft_slot=MY_SEAT),
+            mock_pick("5849", pick_no=2, draft_slot=ANOTHER_SEAT, position="WR"),
+            mock_pick("7564", pick_no=28, draft_slot=MY_SEAT, position="TE"),
+        ],
+        board(
+            ONE_BACK,
+            {"player_id": "00-0000002", "sleeper_id": "5849", "player_name": "Their Receiver",
+             "position": "WR"},
+            {"player_id": "00-0000003", "sleeper_id": "7564", "player_name": "My End",
+             "position": "TE"},
+        ),
+        league(seat=MY_SEAT, roster_id=MY_ROSTER),
+    )
+
+    assert [player["player_name"] for player in result["mine"]] == ["My Back", "My End"]
+    assert players_in(result["roster"], "RB") == ["My Back"]
+    assert players_in(result["roster"], "TE") == ["My End"]
+    # Everyone drafted is still off the board, mine and theirs alike — the fallback decides
+    # whose a pick is, never whether it happened.
+    assert result["taken"] == {"00-0000001", "00-0000002", "00-0000003"}
+
+
+# C3. A pick with no roster ID, made from somebody else's seat, is not mine.
+def test_a_pick_with_no_roster_id_from_another_seat_is_not_mine():
+    result = ingest_picks(
+        [mock_pick("4034", pick_no=1, draft_slot=ANOTHER_SEAT)],
+        board(ONE_BACK),
+        league(seat=MY_SEAT, roster_id=MY_ROSTER),
+    )
+
+    assert result["mine"] == []
+    assert players_in(result["roster"], "RB") == []
+    assert result["taken"] == {"00-0000001"}
+
+
+# C4. A pick carrying somebody else's roster ID but *my* draft slot is not mine.
+#
+#     The traded pick, and the case that proves the precedence is the right way round: I once held
+#     this slot, another manager holds the pick now and made it. Read `draft_slot` first and his
+#     player lands on my roster while the board looks entirely plausible — which is the failure
+#     `seat.py`'s docstring warns about for `draft_order` and `slot_to_roster_id`.
+def test_a_traded_pick_belongs_to_the_roster_that_made_it_not_to_the_seat():
+    result = ingest_picks(
+        [{**pick("4034", pick_no=1, roster_id=ANOTHER_ROSTER), "draft_slot": MY_SEAT}],
+        board(ONE_BACK),
+        league(seat=MY_SEAT, roster_id=MY_ROSTER),
+    )
+
+    assert result["mine"] == []
+    assert players_in(result["roster"], "RB") == []
+    assert result["taken"] == {"00-0000001"}
+
+
+# C5. A hand-marked player is gone, and is never mine.
+#
+#     `marks.as_picks` gives an entry no roster and no pick number, and it has never carried a
+#     draft slot: a mark says a player is *gone*, never whose he is. With the fallback in place
+#     that has to stay true — an entry with neither identifier must not fall through to my seat.
+UNCLAIMED_HAND_MARK = {"player_id": "4034", "roster_id": None, "pick_no": None, "metadata": {}}
+
+
+def test_a_hand_marked_player_is_gone_but_never_mine():
+    result = ingest_picks(
+        [UNCLAIMED_HAND_MARK], board(ONE_BACK), league(seat=MY_SEAT, roster_id=MY_ROSTER)
+    )
+
+    assert result["taken"] == {"00-0000001"}
+    assert result["mine"] == []
+    assert players_in(result["roster"], "RB") == []
