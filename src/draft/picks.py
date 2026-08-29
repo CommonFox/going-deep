@@ -194,6 +194,10 @@ def ingest_picks(picks: list[dict], board: pd.DataFrame, league: dict) -> dict:
 
     - `taken` — the board's own player IDs for everyone drafted, mine and everyone else's.
     - `roster` — my lineup so far, a frame of one row per starting slot.
+    - `mine` — my own picks, in the order I made them, carrying the position each one was. The
+      roster frame reports an *assignment* — a third back sits in the flex, and the bench mixes
+      every position together — so the shape of my opening cannot be read back out of it. This is
+      the same picks, unassigned, and it is what `composition` reads.
     - `unmatched` — every pick whose player the board could not identify, named, in draft order.
     - `next_pick` — the overall number of my next turn, or None once the draft is over.
     - `pick_after_next` — the turn after that, or None when my next turn is my last. This is what
@@ -240,6 +244,7 @@ def ingest_picks(picks: list[dict], board: pd.DataFrame, league: dict) -> dict:
     return {
         "taken": taken,
         "roster": _roster_frame(_assign_to_slots(mine, league["slots"]), league["slots"]),
+        "mine": mine,
         "unmatched": unmatched,
         "next_pick": next_pick,
         # The same walk, started from my next turn rather than from the draft: whatever I pass on

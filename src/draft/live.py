@@ -54,8 +54,8 @@ not revisited under a pick clock.
 
 ## This module is the edge, and the only part of `src/draft/` that is
 
-`picks`, `candidates`, `seat` and `render` are all pure: frames and payloads in, frames and
-strings out. Everything that touches the world is here, in one file, so that "does this tool
+`picks`, `candidates`, `seat`, `composition` and `render` are all pure: frames and payloads in,
+frames and strings out. Everything that touches the world is here, in one file, so that "does this tool
 write anything" is a question answered by reading one module rather than four.
 
 What it touches, exhaustively:
@@ -64,7 +64,7 @@ What it touches, exhaustively:
   picks on every tick. There is no POST anywhere in this package, which is what "never makes a
   pick" means in practice: the tool has no code path that could submit one, rather than a flag
   saying it shouldn't.
-- Two reads of `data/warehouse.duckdb` through `src.query.q`, which opens read-only and closes
+- Three reads of `data/warehouse.duckdb` through `src.query.q`, which opens read-only and closes
   before each returns. A draft-night process cannot corrupt what the pipeline built, and cannot
   hold the file lock against a rebuild either.
 - Whatever has been typed at **stdin**, read without blocking and resolved against the board by
@@ -100,6 +100,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
+from src.draft.composition import composition_guidance
 from src.draft.marks import combine, read_mark
 from src.draft.picks import ingest_picks, picks_made
 from src.draft.refresh import fingerprint, status_line
@@ -253,6 +254,32 @@ def load_survival(league_key: str = LEAGUE_KEY) -> pd.DataFrame:
     return survival
 
 
+def load_plans(league_key: str = LEAGUE_KEY) -> pd.DataFrame:
+    """What each opening plan was worth from each seat, as the simulation scored it days ago.
+
+    The one table here that prices a *roster shape* rather than a player. It is read whole for the
+    league and filtered to the seat above, in `composition`, because the seat is not known until
+    the draft record has been fetched — and because a pure function that does its own filtering is
+    a pure function whose filtering can be tested.
+    """
+    plans = q(
+        """
+        SELECT draft_slot, plan, trials, points_vs_field, win_rate
+        FROM draft_plans
+        WHERE league_key = ?
+        """,
+        [league_key],
+    )
+    if plans.empty:
+        # Not a refusal, for the same reason a missing survival table is not: the board is still
+        # worth reading, and the screen says the opening guidance has nothing behind it.
+        print(
+            f"\ndraft_plans holds no rows for league {league_key!r} — the board will show no "
+            "opening guidance. Run scripts/build_warehouse.sh to price roster shapes.\n"
+        )
+    return plans
+
+
 def prepare() -> dict:
     """Everything that cannot change once the draft is under way, read once.
 
@@ -264,6 +291,7 @@ def prepare() -> dict:
     return {
         "board": load_board(),
         "survival": load_survival(),
+        "plans": load_plans(),
         "draft": draft,
         "league": resolve_seat(draft, user_id(USERNAME)),
     }
@@ -296,9 +324,14 @@ def screen(
     candidates = ranked["candidates"].merge(
         context["board"][["player_id", "bye_week"]], on="player_id", how="left"
     )
+
+    # Beside the ranking, never in it: the guidance is read from the plan table and says what a
+    # position keeps open or closes off, and the order below it is the same order either way.
+    guidance = composition_guidance(context["plans"], result, context["league"])
     return render_board(
         candidates, result, context["league"], limit,
         degraded=ranked["degraded"], covers_to=ranked["covers_to"], marked=marked,
+        guidance=guidance,
     )
 
 
