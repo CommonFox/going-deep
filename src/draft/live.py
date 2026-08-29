@@ -124,9 +124,10 @@ USERNAME = "commonfox"
 # last of the preseason news in it — the window in which starters are named and seasons end.
 MAX_WAREHOUSE_AGE = timedelta(hours=24)
 
-# About a screenful. The count above the table always names the total, so a cut list never reads
-# as a short one, and `--limit` is there for looking deeper.
-DEFAULT_LIMIT = 30
+# About a screenful. A board that has to be scrolled is a board that gets skimmed, and the
+# scrolling is what the first mock rehearsal turned up. The count above the table always names
+# the total, so a cut list never reads as a short one, and `--limit` is there for looking deeper.
+DEFAULT_LIMIT = 15
 
 # A draft night has a pick clock. A request that hangs is worse than one that fails, because a
 # failure is reported and retried on the next tick and a hang is a screen that has stopped.
