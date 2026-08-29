@@ -482,3 +482,55 @@ def test_an_opening_no_plan_covers_says_so_rather_than_showing_a_band():
 def test_a_screen_with_no_guidance_says_nothing_about_the_opening():
     out = render_board(candidates(), ingested(), LEAGUE)
     assert "Opening shape" not in out
+
+
+# Issue #29, user story 17: the screen when the board has been narrowed to one position.
+#
+# The narrowing itself happens in the ranking, which was written to take a position and is tested
+# for it. What is asserted here is the half that stops a narrowed board being read as the whole
+# one: the heading has to say which position it is showing, and an empty one has to say which
+# position is empty. "nobody left on the board" under a quarterback filter is a sentence that would
+# end a draft.
+
+
+# 33. A board showing one position says so where the count is read.
+def test_a_narrowed_board_names_the_position_it_is_showing():
+    out = render_board(
+        candidates(
+            {"player_id": "00-0000001", "player_name": "A Passer", "position": "QB"},
+        ),
+        ingested(), LEAGUE, position="QB",
+    )
+    assert "QB" in line_naming(out, "Best available")
+
+
+# 34. And a board showing everything claims nothing about a position.
+def test_an_unnarrowed_board_names_no_position():
+    out = render_board(candidates(), ingested(), LEAGUE)
+    heading = line_naming(out, "Best available")
+
+    assert "only" not in heading.lower()
+
+
+# 35. The sentence that would cost a pick. Nobody left *at this position* is a reason to look
+# elsewhere; nobody left *on the board* is a finished draft, and the two must not read alike.
+def test_an_empty_narrowed_board_says_which_position_is_empty():
+    out = render_board(candidates(), ingested(), LEAGUE, position="QB")
+
+    assert "QB" in line_naming(out, "left")
+
+
+# 36. The filter narrows the list and nothing else. My roster is my roster whatever the board is
+# showing, and the opening shape is a claim about the roster rather than about the list below it.
+def test_narrowing_the_board_leaves_the_roster_and_the_opening_shape_alone():
+    rows = [
+        {"player_id": "00-0000001", "player_name": "A Passer", "position": "QB"},
+        {"player_id": "00-0000002", "player_name": "A Back", "position": "RB"},
+    ]
+    full = render_board(candidates(*rows), ingested(), LEAGUE, guidance=guidance())
+    narrowed = render_board(
+        candidates(rows[0]), ingested(), LEAGUE, guidance=guidance(), position="QB"
+    )
+
+    assert section(narrowed, "My roster") == section(full, "My roster")
+    assert section(narrowed, "Opening shape") == section(full, "Opening shape")

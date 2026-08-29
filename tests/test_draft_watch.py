@@ -295,3 +295,59 @@ def test_an_unmark_puts_the_player_back_on_the_board():
     assert len(drawn) == 2
     assert "Bravo Wideout" not in available(drawn[0])
     assert "Bravo Wideout" in available(drawn[1])
+
+
+# Issue #29, user story 17: the filter reaching the running tool, which is the whole point of
+# typing it rather than passing it at startup. The board is three players at three positions, so
+# a narrowed screen is unambiguous: `wr` leaves exactly one of them.
+
+
+# 25. Typed, and the board narrows on the same tick — not on the next pick, which in a quiet draft
+# room could be five minutes away.
+def test_a_typed_position_narrows_the_board_and_redraws_at_once():
+    payload = [pick(1, "4034")]
+    written = run_typed(payload, payload, typed=[[], ["wr"]])
+
+    drawn = boards(written)
+    assert len(drawn) == 2
+    assert "Charlie Ender" in available(drawn[0])
+    assert "Bravo Wideout" in available(drawn[1])
+    assert "Charlie Ender" not in available(drawn[1])
+
+
+# 26. A filter that reset itself on the next pick would be a filter nobody could read an answer
+# out of, because the next pick lands while the answer is still being read.
+def test_a_narrowed_board_stays_narrowed_as_picks_come_in():
+    written = run_typed(
+        [pick(1, "4034")], [pick(1, "4034"), pick(2, "6786")], typed=[["te"], []]
+    )
+
+    drawn = boards(written)
+    assert len(drawn) == 2
+    assert "Alpha Back" not in available(drawn[1])
+    assert "Charlie Ender" in available(drawn[1])
+
+
+# 27. The way back to the whole board, without restarting the tool mid-draft.
+def test_all_puts_the_whole_board_back():
+    payload = [pick(1, "4034")]
+    written = run_typed(payload, payload, payload, typed=[[], ["te"], ["all"]])
+
+    drawn = boards(written)
+    assert len(drawn) == 3
+    assert "Bravo Wideout" not in available(drawn[1])
+    assert "Bravo Wideout" in available(drawn[2])
+
+
+# 28. Same reasoning as the hand-mark case above it: narrowing is the drafter changing what he
+# asked for, not Sleeper reporting something new, so it is drawn whether the poll answered or not.
+def test_a_typed_position_narrows_the_board_on_a_tick_the_poll_failed():
+    written = run_typed(
+        [pick(1, "4034")], requests.ConnectionError("connection reset"),
+        typed=[[], ["wr"]],
+    )
+
+    drawn = boards(written)
+    assert len(drawn) == 2
+    assert "Charlie Ender" not in available(drawn[1])
+    assert "Bravo Wideout" in available(drawn[1])
