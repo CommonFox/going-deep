@@ -55,7 +55,8 @@ not revisited under a pick clock.
 
 ## This module is the edge, and the only part of `src/draft/` that is
 
-`picks`, `candidates`, `seat`, `composition`, `cliff`, `filter` and `render` are all pure: frames
+`picks`, `candidates`, `seat`, `composition`, `cliff`, `filter`, `hold` and `render` are all
+pure: frames
 and payloads in, frames and strings out. Everything that touches the world is here, in one file,
 so that "does this tool write anything" is a question answered by reading one module rather than
 four.
@@ -113,6 +114,7 @@ from src.draft.candidates import rank_candidates
 from src.draft.cliff import position_cliffs
 from src.draft.composition import composition_guidance
 from src.draft.filter import ALL, read_position
+from src.draft.hold import held_positions, withhold
 from src.draft.marks import combine, read_mark
 from src.draft.picks import ingest_picks, picks_made
 from src.draft.refresh import fingerprint, status_line
@@ -371,6 +373,9 @@ def screen(
     applied to what the ranking returned, because cost of waiting is measured against the whole
     board's remaining players — a narrowed screen must show the same prices as an unnarrowed one,
     not the prices a position would have if the rest of the board had been drafted.
+    
+    `position` is also what lifts the hold on kickers and defenses: a drafter who has named the
+    position has asked the question `hold` exists to stop asking on his behalf.
     """
     marked = list(marked)
     result = ingest_picks(combine(picks, marked), context["board"], context["league"])
@@ -393,10 +398,17 @@ def screen(
     # the question it is read for. The second pass is a sort over a few hundred rows.
     cliffs = position_cliffs(rank_candidates(context["board"], result["taken"]))
 
+    # Applied after the ranking rather than before it, for the same reason the position filter is:
+    # what a kicker is worth is measured against the whole board either way, and a hold that fed
+    # back into the arithmetic would change the prices of the players it is trying to protect.
+    # Both frames go through it, because the depth block is the one other place on screen that
+    # could still argue for the round-7 kicker the list has stopped offering.
+    hold = held_positions(result, context["league"], position)
+
     return render_board(
-        candidates, result, context["league"], limit,
+        withhold(candidates, hold), result, context["league"], limit,
         degraded=ranked["degraded"], covers_to=ranked["covers_to"], marked=marked,
-        guidance=guidance, position=position, cliffs=cliffs,
+        guidance=guidance, position=position, cliffs=withhold(cliffs, hold), hold=hold,
     )
 
 
