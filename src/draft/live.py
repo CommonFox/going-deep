@@ -54,8 +54,8 @@ not revisited under a pick clock.
 
 ## This module is the edge, and the only part of `src/draft/` that is
 
-`picks`, `candidates`, `seat`, `composition` and `render` are all pure: frames and payloads in,
-frames and strings out. Everything that touches the world is here, in one file, so that "does this tool
+`picks`, `candidates`, `seat`, `composition`, `filter` and `render` are all pure: frames and
+payloads in, frames and strings out. Everything that touches the world is here, in one file, so that "does this tool
 write anything" is a question answered by reading one module rather than four.
 
 What it touches, exhaustively:
@@ -68,14 +68,17 @@ What it touches, exhaustively:
   before each returns. A draft-night process cannot corrupt what the pipeline built, and cannot
   hold the file lock against a rebuild either.
 - Whatever has been typed at **stdin**, read without blocking and resolved against the board by
-  `marks`. Nothing is written anywhere as a result: a hand-mark lives in memory until Ctrl-C.
+  `filter` and then `marks`. Nothing is written anywhere as a result: a hand-mark and a narrowed
+  board both live in memory until Ctrl-C.
 
 ## Nothing is configured by typing
 
 The league ID and season come from `src.silver.sleeper`, so the repo holds one league ID rather
-than two that can disagree. A player's name typed during the draft is the one thing that is ever
-typed at this tool, and it is resolved against the board rather than configuring anything. Everything else — seat, roster, team count, rounds, starting slots —
-is read out of the draft record. The one configured name is the Sleeper username below, which is
+than two that can disagree. A player's name and a position are the only things ever typed at this
+tool, and both are resolved against the board rather than configuring anything: one says a player
+is gone, the other says which part of the board to look at, and neither changes a number.
+Everything else — seat, roster, team count, rounds, starting slots — is read out of the draft
+record. The one configured name is the Sleeper username below, which is
 resolved to a user ID against the API and then to a seat against the draft order.
 
 ## Why it refuses to run against an old warehouse
@@ -101,6 +104,7 @@ import pandas as pd
 import requests
 
 from src.draft.composition import composition_guidance
+from src.draft.filter import ALL, read_position
 from src.draft.marks import combine, read_mark
 from src.draft.picks import ingest_picks, picks_made
 from src.draft.refresh import fingerprint, status_line
@@ -299,7 +303,8 @@ def fetch_picks(context: dict) -> list[dict]:
 
 
 def screen(
-    context: dict, picks: list[dict], limit: int = DEFAULT_LIMIT, marked=()
+    context: dict, picks: list[dict], limit: int = DEFAULT_LIMIT, marked=(),
+    position: str | None = None,
 ) -> str:
     """One picks payload against the frozen half, drawn — subtract, rank, render.
 
@@ -309,10 +314,15 @@ def screen(
     `marked` is the players the drafter has taken off the board by hand. They are unioned into the
     payload here rather than handled separately, so that everything below this line sees one list
     of who is gone and `ingest_picks` does the deduplication it was written to do.
+
+    `position` narrows the candidate list to one position. It is handed to the ranking rather than
+    applied to what the ranking returned, because cost of waiting is measured against the whole
+    board's remaining players — a narrowed screen must show the same prices as an unnarrowed one,
+    not the prices a position would have if the rest of the board had been drafted.
     """
     marked = list(marked)
     result = ingest_picks(combine(picks, marked), context["board"], context["league"])
-    ranked = rank_by_cost_of_waiting(context["board"], context["survival"], result)
+    ranked = rank_by_cost_of_waiting(context["board"], context["survival"], result, position)
 
     # The bye week is joined back on by ID rather than carried through the ranking: what the
     # ranking returns is a fixed contract, and a display column is not the ranking's business.
@@ -327,14 +337,38 @@ def screen(
     return render_board(
         candidates, result, context["league"], limit,
         degraded=ranked["degraded"], covers_to=ranked["covers_to"], marked=marked,
-        guidance=guidance,
+        guidance=guidance, position=position,
     )
 
 
-def render_once(limit: int = DEFAULT_LIMIT) -> str:
+def starting_position(typed: str | None, board: pd.DataFrame) -> str | None:
+    """A `--position` flag resolved against the board, or the whole board and a reason why.
+
+    Read through exactly the path a typed line takes, so a flag cannot recognise a position the
+    running tool would not. A flag naming nothing is a note rather than an exit: the board is
+    still worth reading, the drafter can narrow it by typing once the tool is up, and a session
+    that refused to start over a typo is a session that starts late.
+    """
+    if typed is None:
+        return None
+    outcome = read_position(typed, board)
+    if outcome is None or outcome["action"] != "show":
+        carried = ", ".join(sorted(str(value) for value in board["position"].unique()))
+        print(
+            f"\nno position on this board is called {typed!r} — showing the whole board. "
+            f"It carries {carried}.\n"
+        )
+        return None
+    return outcome["position"]
+
+
+def render_once(limit: int = DEFAULT_LIMIT, position: str | None = None) -> str:
     """Everything, once: fetch, resolve, subtract, rank, and give back the screen."""
     context = prepare()
-    return screen(context, fetch_picks(context), limit)
+    return screen(
+        context, fetch_picks(context), limit,
+        position=starting_position(position, context["board"]),
+    )
 
 
 def _write(text: str) -> None:
@@ -393,6 +427,7 @@ def watch(
     write=_write,
     keys=_typed,
     interval: float = REFRESH_SECONDS,
+    position: str | None = None,
 ) -> None:
     """Draw the board, then keep it current until interrupted.
 
@@ -403,11 +438,16 @@ def watch(
     the last check that did work, and the next tick asks again. Nothing short of Ctrl-C ends this,
     because a session that ends at pick eleven is a session nobody restarts in time.
 
-    A name typed at it is read on the next tick and marked taken by hand — see `marks` for what
-    that resolves against and what it refuses. Marks are held here, for the session, and unioned
-    into every draw from the moment they are made: the last payload a poll returned is kept, so a
-    mark still redraws the board on a tick Sleeper did not answer, which is the whole reason the
-    drafter is typing in the first place.
+    A line typed at it is read on the next tick as a position first and a name second — see
+    `filter` for why that way round, and `marks` for what a name resolves against and what it
+    refuses. Both are held here, for the session, and both take effect on the tick they are read:
+    the last payload a poll returned is kept, so a mark or a filter still redraws the board on a
+    tick Sleeper did not answer, which is the whole reason the drafter is typing in the first
+    place.
+
+    `position` is what the board starts narrowed to, for a session begun with `--position`. It is
+    a starting state and not a fixed one — the drafter can widen or narrow it at any point without
+    restarting, which is the only reason the filter is worth having.
     """
     poll = poll or (lambda: fetch_picks(context))
 
@@ -434,27 +474,40 @@ def watch(
                 if not line.strip():
                     # Enter on an empty line is how a half-typed name gets cleared.
                     continue
-                outcome = read_mark(line, context["board"], marked)
+                # A position first, a name second. `read_position` hands back None for a line
+                # that is not one of the board's positions, which is every name a drafter types.
+                outcome = read_position(line, context["board"], position)
+                if outcome is None:
+                    outcome = read_mark(line, context["board"], marked)
                 if outcome["action"] == "mark":
                     marked[outcome["player"]["player_id"]] = outcome["player"]
                 elif outcome["action"] == "unmark":
                     marked.pop(outcome["player"]["player_id"], None)
+                elif outcome["action"] in ("show", "clear"):
+                    position = outcome["position"]
                 # Every outcome, refusals included: a mark that said nothing would be read as one
-                # that worked. Ends the status line rather than being written over it.
+                # that worked, and a filter that said nothing would be a narrowed board read as a
+                # whole one. Ends the status line rather than being written over it.
                 write(f"\n{outcome['message']}\n")
                 status_width = 0
 
             combined = combine(picks, marked.values())
             made = picks_made(combined)
-            seen = fingerprint(combined)
+            # What is on screen is the picks *and* what the board is narrowed to: typing `qb`
+            # changes the screen without changing a single pick, and a fingerprint that ignored it
+            # would leave the drafter's own request undrawn until somebody else made a selection.
+            seen = (fingerprint(combined), position)
 
             # A failed poll on its own draws nothing — the board has not changed and the status
-            # line says the connection has. A mark is a change, and gets drawn whether Sleeper
-            # answered or not.
-            if (error is None or marked) and seen != drawn:
+            # line says the connection has. A mark or a filter is the drafter changing what he
+            # asked for, and gets drawn whether Sleeper answered or not.
+            if (error is None or marked or position) and seen != drawn:
                 # End whatever status line is sitting on the terminal before drawing past it.
                 lead = "\n" if drawn is None else f"\n{_rule(made, len(marked))}\n"
-                write(f"{lead}\n{screen(context, picks, limit, marked.values())}\n")
+                write(
+                    f"{lead}\n"
+                    f"{screen(context, picks, limit, marked.values(), position)}\n"
+                )
                 drawn = seen
                 status_width = 0
 
@@ -469,22 +522,23 @@ def watch(
         write(f"\n\nstopped at {made} picks made — no pick was ever submitted\n")
 
 
-def main(limit: int = DEFAULT_LIMIT, once: bool = False) -> None:
+def main(limit: int = DEFAULT_LIMIT, once: bool = False, position: str | None = None) -> None:
     built_at = warehouse_built_at()
     check_recency(built_at, datetime.now())
     built = f"board built {built_at:%Y-%m-%d %H:%M} — read-only, no pick is ever submitted"
 
     if once:
-        print(render_once(limit))
+        print(render_once(limit, position))
         print(f"\n{built}")
         return
 
     context = prepare()
     print(
-        f"{built}\nrefreshing every {REFRESH_SECONDS:.0f}s — type a name to mark him taken by "
-        "hand, -name to undo, Ctrl-C to stop"
+        f"{built}\nrefreshing every {REFRESH_SECONDS:.0f}s — type a position to show only it "
+        f'("qb", "{ALL}" for everyone), a name to mark him taken by hand, -name to undo, '
+        "Ctrl-C to stop"
     )
-    watch(context, limit)
+    watch(context, limit, position=starting_position(position, context["board"]))
 
 
 if __name__ == "__main__":
@@ -499,10 +553,14 @@ if __name__ == "__main__":
         "--once", action="store_true",
         help="draw the board once and exit, instead of refreshing until interrupted",
     )
+    parser.add_argument(
+        "--position", default=None,
+        help="show only one position (QB, RB, ...); can be changed by typing at the running tool",
+    )
     arguments = parser.parse_args()
 
     try:
-        main(arguments.limit, arguments.once)
+        main(arguments.limit, arguments.once, arguments.position)
     except KeyboardInterrupt:
         # Ctrl-C before the loop starts — during the warehouse read or the first fetch. The loop
         # has its own, which stops cleanly rather than unwinding.
