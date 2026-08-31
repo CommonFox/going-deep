@@ -416,9 +416,25 @@ On draft night, keep the Sleeper board on screen and refreshing as the picks com
 
 ```bash
 python -m src.draft.live              # the top 15 still available, redrawn as the draft moves
-python -m src.draft.live --limit 50
+python -m src.draft.live --limit 50   # show more of the board
 python -m src.draft.live --once       # draw it once and exit
+python -m src.draft.live --position rb   # start narrowed to one position
 ```
+
+With no `--draft-id`, it finds this season's real draft for the league configured in
+`src/silver/sleeper.py` (and resolves the seat for the username set in `src/draft/live.py`).
+
+**Mock drafts.** A Sleeper mock belongs to no league, so it never shows up in the league's draft
+list and has to be named directly. Start a mock on Sleeper, grab the ID from the draft URL
+(`sleeper.com/draft/nfl/<draft-id>`), and pass it:
+
+```bash
+python -m src.draft.live --draft-id 1399447972411912192
+python -m src.draft.live --draft-id 1399447972411912192 --once
+```
+
+The mock must be the same shape (team count and starting slots) as the league the board was priced
+for, or the tool refuses to run rather than show prices that don't match the draft.
 
 It resolves the seat from the draft order, subtracts the picks already made, ranks what is left by
 what waiting for it would cost, and shows the roster so far and the next overall pick number.
