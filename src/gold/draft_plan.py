@@ -150,16 +150,27 @@ def _probability_available(board: pd.DataFrame, overall_pick: int) -> pd.Series:
 
     The half-pick offset is a continuity correction: draft positions are whole numbers and the
     normal is continuous, so "at or after pick k" is the tail beyond k - 0.5.
+
+    Only the near end of the observed range is enforced. `adp_high` is the earliest a player has
+    actually been taken, and no player on either board carries one later than his own
+    `consensus_adp`, so pinning him to certainty before it never contradicts the distribution it
+    overrides.
+
+    The far end no longer pins him to zero. `adp_low` is the maximum of a finite sample, which can
+    only move outward as more drafts are observed — and it is a *different source's* maximum:
+    `consensus_adp` is blended across sources while the range comes from whichever FFC board feeds
+    the row's format, as `adp_consensus` says. The two therefore describe different populations,
+    and on the ESPN board 26 of 335 players carry a consensus past their own `adp_low`. Keenan
+    Allen's blend has him going at 199 against an FFC range stopping at 152, so from pick 153 the
+    clip called him certainly gone while his own distribution had him 99.93% available. Once
+    `waiting` reads a dropped row as gone rather than as unknown, that stops being a hidden row
+    and becomes a confident wrong answer. See #72.
     """
     spread = board["adp_stdev"].fillna(_MINIMUM_STDEV).clip(lower=_MINIMUM_STDEV)
     probability = stats.norm.sf(overall_pick - 0.5, loc=board["consensus_adp"], scale=spread)
-
-    # Nobody has ever gone earlier than `adp_high` or later than `adp_low` across thousands of
-    # drafts, so the model shouldn't invent either tail beyond what was actually observed.
-    probability = pd.Series(probability, index=board.index)
-    probability = probability.mask(board["adp_high"] >= overall_pick, 1.0)
-    probability = probability.mask(board["adp_low"] < overall_pick, 0.0)
-    return probability
+    return pd.Series(probability, index=board.index).mask(
+        board["adp_high"] >= overall_pick, 1.0
+    )
 
 
 def _availability_for_league(
