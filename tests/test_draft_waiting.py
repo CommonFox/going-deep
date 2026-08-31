@@ -353,30 +353,131 @@ def test_a_player_the_table_drops_at_my_pick_is_gone_rather_than_unknown():
     assert faller["cost_of_waiting"] == pytest.approx(60.0)
 
 
-def test_a_player_the_table_already_had_gone_gets_no_probability_at_all():
-    """The other side of that: the model has been overtaken by events, so it has nothing to say.
+def test_a_player_the_table_already_had_gone_is_gone_rather_than_unknown():
+    """The deep end of the rule above: the table wrote him off before the gap even opened.
 
-    A player with no row at the pick about to be made is one the table says is *already* gone —
-    yet here he sits on the board. The conditional has a zero denominator, and there is no honest
-    number to put in its place, so he is flagged like anyone else the model does not cover.
+    A player with no row at the pick the gap opens on is one the table had gone *already* — and
+    yet here he sits on the board. The conditional's denominator is missing, which reads at first
+    like nothing to divide by. It is not. The warehouse computed a zero for him and then dropped
+    the row for falling under its own floor, which is the same thing it does on the numerator side
+    and means the same thing here: gone.
+
+    Reading that absence as a gap is what put Jalen Hurts 219th of 947 in a live mock while he sat
+    available at 2.14 with the second-highest value on the board (#70). So the answer is the one
+    the numerator already gives, and waiting on him costs the whole drop to whoever is behind him.
     """
     result = rank_by_cost_of_waiting(
         board(
             player("00-0000001", "Long Faller", 100.0),
-            player("00-0000002", "Priced Back", 40.0),
+            player("00-0000002", "Next Back", 40.0),
         ),
         survival(
+            # One row far back at pick 1 and nothing after it: the shape the warehouse leaves for
+            # a player whose whole distribution sits ahead of the picks being decided.
             ("00-0000001", 1, 1.0),
             *at(GAP_STARTS, ("00-0000002", 1.0)),
-            *at(WAIT_TO, ("00-0000002", 0.5)),
+            *at(WAIT_TO, ("00-0000002", 1.0)),
         ),
         picks(),
     )
 
     faller = row_for(result, "Long Faller")
-    assert faller["survival_known"] == False  # noqa: E712 — the flag itself is the claim
-    assert pd.isna(faller["p_survives"])
-    assert pd.isna(faller["cost_of_waiting"])
+    assert faller["survival_known"] == True  # noqa: E712 — the flag itself is the claim
+    assert faller["p_survives"] == 0.0
+    # Certain to be gone, so waiting costs the whole drop to the next back: 100 - 40.
+    assert faller["cost_of_waiting"] == pytest.approx(60.0)
+    assert result["degraded"] is False
+
+
+def test_the_most_valuable_faller_leads_the_one_list():
+    """The regression for #70, stated the way a drafter would have seen it go wrong.
+
+    There is one list, and the best pick on the board is at the top of it. A faller ranked behind
+    every player the model happens to cover is a faller nobody reads, because the screen is cut to
+    fifteen rows and he was 218th.
+    """
+    result = rank_by_cost_of_waiting(
+        board(
+            player("00-0000001", "Long Faller", 100.0),
+            player("00-0000002", "Next Back", 40.0),
+            player("00-0000003", "Priced Receiver", 90.0, position="WR"),
+            player("00-0000004", "Backup Receiver", 30.0, position="WR"),
+        ),
+        survival(
+            ("00-0000001", 1, 1.0),
+            *at(
+                GAP_STARTS,
+                ("00-0000002", 1.0), ("00-0000003", 1.0), ("00-0000004", 1.0),
+            ),
+            *at(
+                WAIT_TO,
+                ("00-0000002", 1.0), ("00-0000003", 0.5), ("00-0000004", 1.0),
+            ),
+        ),
+        picks(),
+    )
+
+    # The faller costs the full 100 - 40; the receiver, half likely to last, costs 90 - 60.
+    assert names(result)[0] == "Long Faller"
+    assert row_for(result, "Long Faller")["cost_of_waiting"] == pytest.approx(60.0)
+    assert row_for(result, "Priced Receiver")["cost_of_waiting"] == pytest.approx(30.0)
+
+
+def test_a_faller_certain_to_be_gone_is_nobody_elses_fallback():
+    """Zero means gone, and a man who is gone is not the man you fall back to.
+
+    Three backs in value order with the faller in the middle, so the claim is about the player
+    *above* him: he must be priced against the third back, because falling back onto somebody who
+    is certainly gone is not falling back at all. This is the half of the semantics a flag on its
+    own cannot state — `p_survives` of 0 has to flow through the expectation, not just the column.
+    """
+    result = rank_by_cost_of_waiting(
+        board(
+            player("00-0000001", "Top Back", 100.0),
+            player("00-0000002", "Long Faller", 80.0),
+            player("00-0000003", "Third Back", 20.0),
+        ),
+        survival(
+            ("00-0000002", 1, 1.0),
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000003", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 0.0), ("00-0000003", 1.0)),
+        ),
+        picks(),
+    )
+
+    # Expected best available walks up from the bottom: the third back is certain at 20, the
+    # faller is gone so the expectation past him is still 20, and the top back — gone himself —
+    # is priced against that 20 rather than against the faller's 80.
+    assert row_for(result, "Third Back")["cost_of_waiting"] == pytest.approx(0.0)
+    assert row_for(result, "Long Faller")["cost_of_waiting"] == pytest.approx(60.0)
+    assert row_for(result, "Top Back")["cost_of_waiting"] == pytest.approx(80.0)
+
+
+def test_at_the_turn_even_a_player_the_model_never_covered_is_certain_to_last():
+    """An empty gap is certainty for everybody, and that is arithmetic rather than a model.
+
+    Deciding pick 28 and picking again at 29, nobody else selects in between, so there is no
+    hazard for anyone to survive — whether the table has an opinion about him or not. Case 20
+    already pins this for players the frame covers; the two it does not cover are the ones that
+    used to come back `NaN` and sink to the bottom of a list where nothing costs anything.
+    """
+    result = rank_by_cost_of_waiting(
+        board(
+            player("00-0000001", "Priced Back", 90.0),
+            player("00-0000002", "Long Faller", 120.0),
+            player("00-0000003", "Unpriced Rookie", 60.0, position="WR"),
+        ),
+        # Only the first of the three is in the frame at all.
+        survival(*at(29, ("00-0000001", 0.086))),
+        picks(next_pick=28, pick_after_next=29, picks_made=27),
+    )
+
+    assert list(result["candidates"]["p_survives"]) == [1.0, 1.0, 1.0]
+    assert list(result["candidates"]["cost_of_waiting"]) == [0.0, 0.0, 0.0]
+    assert list(result["candidates"]["survival_known"]) == [True, True, True]
+    # Nothing costs anything, so the list falls through to value — with the faller leading it
+    # rather than buried under the one player the table happens to price.
+    assert names(result) == ["Long Faller", "Priced Back", "Unpriced Rookie"]
     assert result["degraded"] is False
 
 
