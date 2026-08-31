@@ -239,8 +239,12 @@ def test_a_player_with_no_survival_data_is_ranked_by_value_and_flagged():
     assert rookie["survival_known"] == False  # noqa: E712 — the flag itself is the claim
     assert pd.isna(rookie["p_survives"])
     assert pd.isna(rookie["cost_of_waiting"])
-    # Ranked by value: after everyone who has a cost of waiting, and among themselves by value.
-    assert names(result)[-2:] == ["Unpriced Rookie", "Unpriced Camp Body"]
+    # Ranked by value, among everyone whose waiting costs nothing rather than beneath the lot of
+    # them: the rookie outvalues the mid back, who is certain to last and therefore also free to
+    # wait on, so he sorts above him. Only the priced back, who costs something, is ahead of both.
+    assert names(result) == [
+        "Priced Back", "Unpriced Rookie", "Mid Back", "Unpriced Camp Body",
+    ]
 
     # The strong form of "never treated as a number": a missing probability is not silently a 0 or
     # a 1, so the players who *do* have one price identically whether or not he is on the board.
@@ -479,6 +483,85 @@ def test_at_the_turn_even_a_player_the_model_never_covered_is_certain_to_last():
     # rather than buried under the one player the table happens to price.
     assert names(result) == ["Long Faller", "Priced Back", "Unpriced Rookie"]
     assert result["degraded"] is False
+
+
+# 71. A missing cost of waiting is an unknown urgency, not a known lack of value. The board carries
+#     728 players with no ADP at all, and `na_position="last"` sorted every one of them below every
+#     player the survival model happens to price.
+def test_a_player_with_no_cost_sorts_by_value_rather_than_below_everyone():
+    """No ADP source lists him, so nothing in the market is about to take him.
+
+    That silence is a statement about *urgency* — wait on him, he will keep — and not a statement
+    about worth. Sorting it as "less than everybody" quietly turned the one into the other.
+    """
+    result = rank_by_cost_of_waiting(
+        board(
+            player("00-0000001", "Priced Back", 90.0),
+            player("00-0000002", "Unpriced Rookie", 200.0, position="WR"),
+        ),
+        survival(
+            *at(GAP_STARTS, ("00-0000001", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 1.0)),
+        ),
+        picks(),
+    )
+
+    # Both are free to wait on. Between two players who cost nothing, value decides.
+    assert names(result) == ["Unpriced Rookie", "Priced Back"]
+
+    # Placed, not priced: the row still says it has no number, because it has none.
+    rookie = row_for(result, "Unpriced Rookie")
+    assert rookie["survival_known"] == False  # noqa: E712 — the flag itself is the claim
+    assert pd.isna(rookie["p_survives"])
+    assert pd.isna(rookie["cost_of_waiting"])
+
+
+def test_an_unknown_urgency_never_outranks_a_known_one():
+    """The boundary that keeps this from swallowing the faller fix.
+
+    A player who costs something to pass on is ahead of a player who costs nothing, however much
+    more valuable the second one is. Otherwise a board with no ADP coverage would bury exactly the
+    players cost of waiting exists to surface.
+    """
+    result = rank_by_cost_of_waiting(
+        board(
+            player("00-0000001", "Urgent Back", 40.0),
+            player("00-0000002", "Cheap Back", 10.0),
+            player("00-0000003", "Unpriced Star", 200.0, position="WR"),
+        ),
+        survival(
+            *at(GAP_STARTS, ("00-0000001", 1.0), ("00-0000002", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 0.0), ("00-0000002", 1.0)),
+        ),
+        picks(),
+    )
+
+    # The urgent back costs 40 - 10 to pass on; the star costs nothing anybody can name.
+    assert names(result) == ["Urgent Back", "Unpriced Star", "Cheap Back"]
+    assert row_for(result, "Urgent Back")["cost_of_waiting"] == pytest.approx(30.0)
+
+
+def test_players_without_survival_data_are_ordered_by_value_then_name():
+    """Among themselves, the same two keys as everybody else, in the same order."""
+    result = rank_by_cost_of_waiting(
+        board(
+            player("00-0000001", "Anchor Back", 70.0),
+            player("00-0000002", "Unpriced Top", 100.0, position="TE"),
+            player("00-0000003", "Unpriced Zeta", 50.0, position="WR"),
+            player("00-0000004", "Unpriced Alpha", 50.0, position="WR"),
+        ),
+        survival(
+            *at(GAP_STARTS, ("00-0000001", 1.0)),
+            *at(WAIT_TO, ("00-0000001", 1.0)),
+        ),
+        picks(),
+    )
+
+    # Everything costs nothing, so this is value order throughout, with the two equal receivers
+    # broken alphabetically the way every other tie on this board is.
+    assert names(result) == [
+        "Unpriced Top", "Anchor Back", "Unpriced Alpha", "Unpriced Zeta",
+    ]
 
 
 def test_a_finished_draft_degrades_rather_than_raising():

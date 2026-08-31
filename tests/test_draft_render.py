@@ -316,6 +316,32 @@ def test_a_candidate_with_no_survival_data_shows_gaps_rather_than_numbers():
     assert "Unpriced Rookie" in row
 
 
+def test_a_candidate_with_no_survival_data_reads_as_a_gap_where_it_now_sits():
+    """#71 places him among the priced rows, so the gap has to be legible where he lands.
+
+    Below the bottom of the list he was a footnote nobody reached. Between two rows that carry
+    numbers he is a row a drafter could read as a zero, and a zero cost of waiting is a different
+    pick from an unknown one.
+    """
+    out = render_board(
+        candidates(
+            {"player_id": "00-0000001", "player_name": "Urgent Back", "cost_of_waiting": 30.0},
+            {"player_id": "00-0000002", "player_name": "Unpriced Rookie", "p_survives": None,
+             "cost_of_waiting": None, "survival_known": False},
+            {"player_id": "00-0000003", "player_name": "Cheap Back", "p_survives": 1.0,
+             "cost_of_waiting": 0.0},
+        ),
+        ingested(),
+        LEAGUE,
+    )
+
+    # Both of his numbers are absent, and neither is spelled as one.
+    assert line_naming(out, "Unpriced Rookie").split()[-2:] == ["-", "-"]
+    # The rows either side of him do carry numbers, including a genuine zero he must not look like.
+    assert line_naming(out, "Urgent Back").split()[-2:] == ["35%", "30.0"]
+    assert line_naming(out, "Cheap Back").split()[-2:] == ["100%", "0.0"]
+
+
 def test_a_degraded_result_says_it_has_fallen_back_to_value_ranking():
     out = render_board(
         candidates({"player_name": "Best Left", "p_survives": None, "cost_of_waiting": None,

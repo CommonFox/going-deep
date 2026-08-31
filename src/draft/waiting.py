@@ -248,15 +248,22 @@ def rank_by_cost_of_waiting(
         candidates = candidates.loc[candidates["position"] == position]
 
     # Cost of waiting first, then value, then name. The second key is not only a tiebreak: it is
-    # what ranks a player whose cost cannot be computed, and pandas puts those missing values last
-    # whichever way the first key is sorted, which is exactly where a number nobody has belongs.
-    ranked = candidates[WAITING_COLUMNS].sort_values(
-        ["cost_of_waiting", "points_over_replacement", "player_name"],
+    # what ranks a player whose cost cannot be computed at all.
+    #
+    # A missing cost sorts as *no urgency*, alongside the players whose cost is a computed zero,
+    # rather than below every player who has a number. Nobody's ADP lists him, so nothing in the
+    # market is about to take him, and "he will keep" is the honest reading of that silence;
+    # `na_position="last"` read it instead as "worth less than everyone", which is a claim about
+    # value that nothing supports. The key is derived and thrown away — the column he carries
+    # stays NaN, because this places him and does not price him.
+    ranked = candidates.assign(
+        _urgency=candidates["cost_of_waiting"].fillna(0.0)
+    ).sort_values(
+        ["_urgency", "points_over_replacement", "player_name"],
         ascending=[False, False, True],
-        na_position="last",
     )
     return {
-        "candidates": ranked.reset_index(drop=True),
+        "candidates": ranked[WAITING_COLUMNS].reset_index(drop=True),
         "degraded": degraded,
         "covers_to": covers_to,
     }
