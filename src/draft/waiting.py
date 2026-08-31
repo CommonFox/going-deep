@@ -69,10 +69,11 @@ The denominator starts one past the turn being decided because that turn is *min
 one passing: my own pick cannot be part of the hazard a player has to survive, or the tool charges
 me for the chance that I take him myself.
 
-At the turn the two picks are adjacent, numerator and denominator are the same pick, and the ratio
-is one: nothing costs anything to wait for, because there is no gap. Read off the raw column
-instead, De'Von Achane shows a 9% survival probability at pick 29 and a large cost of waiting from
-a seat that is about to pick twice in a row.
+At the turn the two picks are adjacent and there is no gap at all: nothing costs anything to wait
+for, and that holds for every player on the board rather than only the ones the ratio can be taken
+for. Zero picks by other people is certainty, whether or not the table has ever priced him. Read
+off the raw column instead, De'Von Achane shows a 9% survival probability at pick 29 and a large
+cost of waiting from a seat that is about to pick twice in a row.
 
 ## Three kinds of missing, and only one of them is missing
 
@@ -83,16 +84,23 @@ certain. The three cases:
 
 - **No row at the pick I am waiting to, but rows elsewhere.** He is gone. `p_survives` is 0, and
   waiting costs the full drop to whoever is behind him.
-- **No row at the pick the gap opens on.** The table already had him gone, and yet here he sits.
-  The conditional's denominator is zero, the model has been overtaken by events, and there is no
-  honest number to put in its place.
+- **No row at the pick the gap opens on.** The table had him gone *before* the gap even opened,
+  and yet here he sits. Same answer, and for the same reason: the warehouse computed a zero and
+  then discarded the row for being too small, so the absence *is* that zero rather than a hole
+  where one should be. `p_survives` is 0 and passing on him costs the full drop.
 - **No row anywhere.** No ADP, so no distribution, so nothing to say — the rookies and camp bodies
-  the board carries on its depth arm rather than its market arm.
+  the board carries on its depth arm rather than its market arm. This case alone stays missing:
+  `survival_known` is False, nothing is guessed, and he is ranked by value.
 
-The last two are the same answer: `survival_known` is False, both numbers are missing rather than
-guessed, and he is ranked by value at the end of the list. A missing probability is never defaulted
-to a number, and never enters anyone else's fallback expectation either — a player who cannot be
-weighted cannot be counted on.
+Reading the second case as ignorance is the bug in #70. A NaN in the primary sort key lands below
+every player who has a number, so the value tiebreak is never reached — which put Jalen Hurts
+219th of 947 at a live 2.14 while he sat there with the second-highest value on the board. The
+players it hid were precisely the fallers, which is the one thing a live board exists to catch.
+
+A missing probability is still never defaulted to a number, and never enters anyone else's
+fallback expectation either — a player who cannot be weighted cannot be counted on. A zero is not
+that: it is a weight, and it says a player certain to be gone is nobody's fallback, which the walk
+handles by leaving the expectation past him where it was.
 
 ## Vocabulary
 
@@ -130,23 +138,33 @@ def _survival_probabilities(
     """P(still there at `wait_to` | still there when the gap opens), or NaN where it cannot be said.
 
     `gap_starts` is one past the turn being decided: the first pick somebody else makes, and so the
-    first one that can take the player away.
+    first one that can take the player away. When it is `wait_to` itself the seat picks twice in a
+    row, nobody selects in between, and survival is certain for every player on the board —
+    including the ones the table has never had an opinion about, whose certainty here is
+    arithmetic rather than a probability anybody modelled.
     """
+    if wait_to == gap_starts:
+        return pd.Series(1.0, index=player_ids.index, dtype="float64")
+
     covered = set(survival["player_id"])
     at_next = _at_pick(survival, wait_to)
     at_now = _at_pick(survival, gap_starts)
 
     probabilities = []
     for player_id in player_ids:
-        denominator = at_now.get(player_id)
-        if player_id not in covered or not denominator:
-            # Either the model never covered him, or it had him gone before the gap even opens and
-            # has been overtaken by the fact that he is still sitting on the board.
+        if player_id not in covered:
+            # No ADP anywhere, so no distribution and nothing to say. The one genuinely missing
+            # number of the three, and the only one that stays missing.
             probabilities.append(np.nan)
             continue
-        # An absent numerator is a probability under the table's floor or past his observed range.
-        # Both mean gone, which is a number, not a gap.
-        probabilities.append(min(at_next.get(player_id, 0.0) / denominator, 1.0))
+        # An absent probability is one under the table's floor or past his observed range, and it
+        # means the same thing at whichever end of the ratio it goes missing: gone. A dropped
+        # denominator says the market had him taken before the gap even opened, and a player the
+        # market says is already gone does not last another gap of picks.
+        denominator = at_now.get(player_id)
+        probabilities.append(
+            0.0 if not denominator else min(at_next.get(player_id, 0.0) / denominator, 1.0)
+        )
     return pd.Series(probabilities, index=player_ids.index, dtype="float64")
 
 
