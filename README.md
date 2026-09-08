@@ -463,6 +463,21 @@ stays followable through an outage — which is the one thing polling cannot fix
 It reads the warehouse read-only, refuses to run against a build more than a day old, and has no
 code path that could submit a pick.
 
+**The ESPN league** has the same tool, `src.draft.live_espn`, with the same flags apart from
+`--draft-id` (ESPN's league record *is* its draft record — there is no separate mock to point at):
+
+```bash
+python -m src.draft.live_espn
+python -m src.draft.live_espn --limit 50
+python -m src.draft.live_espn --once
+python -m src.draft.live_espn --position rb
+```
+
+It resolves the seat from `ESPN_S2`/`SWID` in `.env` against the league configured in
+`src/silver/espn.py`. ESPN randomizes the draft order when the room opens (this league's
+`draftSettings.orderType` is `DRAFT_START`), so the tool refuses to resolve a seat — and refuses to
+run at all — until `draftDetail` says the room has actually opened.
+
 Query the warehouse with the DuckDB CLI or Python:
 
 ```bash

@@ -1,0 +1,572 @@
+<title>ESPN Draft Sheet — Seat TBD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    --ground: #F6F8F5;
+    --surface: #FFFFFF;
+    --surface-2: #EEF2EB;
+    --ink: #17211C;
+    --muted: #586F63;
+    --hairline: #DBE2DB;
+    --accent: #1C7A49;
+    --accent-soft: #E3F0E7;
+    --warn: #8A5300;
+    --warn-soft: #F4E9D5;
+    --danger: #A83A33;
+    --danger-soft: #F3E0DD;
+    --shadow: 0 1px 2px rgba(20, 40, 30, .06), 0 8px 24px rgba(20, 40, 30, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0E1411;
+      --surface: #161D19;
+      --surface-2: #1F2823;
+      --ink: #E9EFEA;
+      --muted: #93A29A;
+      --hairline: #2A342F;
+      --accent: #57B47F;
+      --accent-soft: #172620;
+      --warn: #E0A458;
+      --warn-soft: #281F14;
+      --danger: #E37B72;
+      --danger-soft: #2C1A18;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .28);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0E1411;
+    --surface: #161D19;
+    --surface-2: #1F2823;
+    --ink: #E9EFEA;
+    --muted: #93A29A;
+    --hairline: #2A342F;
+    --accent: #57B47F;
+    --accent-soft: #172620;
+    --warn: #E0A458;
+    --warn-soft: #281F14;
+    --danger: #E37B72;
+    --danger-soft: #2C1A18;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .28);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .wrap {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: clamp(1.1rem, 3vw, 2.4rem) clamp(1rem, 3vw, 1.6rem) 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2.4rem;
+  }
+
+  header { display: flex; flex-direction: column; gap: .9rem; }
+
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  h1 {
+    font-family: "Archivo", "Archivo Narrow", sans-serif;
+    font-weight: 800;
+    font-size: clamp(2rem, 7vw, 2.9rem);
+    letter-spacing: -.02em;
+    line-height: 1.02;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .spec {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .8rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem .6rem;
+  }
+  .spec span::after { content: "·"; margin-left: .6rem; color: var(--hairline); }
+  .spec span:last-child::after { content: ""; }
+
+  /* ---- seat picker ---- */
+  .seatbox {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: .6rem;
+    padding: .9rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+  }
+  .seatbox p { margin: 0; font-size: .84rem; color: var(--muted); }
+  .seats { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .seatbtn {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: .88rem;
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: .5rem;
+    border: 1px solid var(--hairline);
+    background: var(--surface-2);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .seatbtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  :root[data-theme="dark"] .seatbtn.active,
+  :root:not([data-theme="light"]) .seatbtn.active { color: #0E1411; }
+
+  /* ---- pick ladder ---- */
+  .ladder { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .2rem; }
+  .rung {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .78rem;
+    font-weight: 600;
+    padding: .32rem .5rem;
+    border-radius: .4rem;
+    background: var(--surface-2);
+    color: var(--muted);
+    border: 1px solid var(--hairline);
+    white-space: nowrap;
+  }
+  .rung.first { background: var(--accent); color: #fff; border-color: var(--accent); }
+  :root[data-theme="dark"] .rung.first,
+  :root:not([data-theme="light"]) .rung.first { color: #0E1411; }
+  .rung b { font-weight: 700; }
+  .rung i { font-style: normal; opacity: .7; font-size: .68rem; margin-left: .3rem; }
+
+  section { display: flex; flex-direction: column; gap: 1rem; }
+
+  h2 {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem;
+    font-weight: 600;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+    padding-bottom: .55rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .thesis {
+    font-family: "Archivo", sans-serif;
+    font-weight: 700;
+    font-size: clamp(1.3rem, 4.6vw, 1.7rem);
+    line-height: 1.2;
+    letter-spacing: -.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .thesis em { font-style: normal; color: var(--accent); }
+  .thesis-sub { margin: 0; color: var(--muted); font-size: .92rem; }
+
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: .6rem;
+    padding: .8rem .7rem;
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+    box-shadow: var(--shadow);
+  }
+  .tile .n {
+    font-family: "Archivo", sans-serif;
+    font-weight: 800;
+    font-size: clamp(1.3rem, 5vw, 1.7rem);
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .tile .l { font-size: .72rem; color: var(--muted); line-height: 1.3; }
+
+  /* ---- pick-by-pick candidate rows ---- */
+  .picks { display: flex; flex-direction: column; gap: .1rem; }
+  .pick {
+    display: grid;
+    grid-template-columns: 4.6rem 1fr;
+    gap: .9rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .pick:first-child { border-top: none; }
+  .anchor {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    display: flex;
+    flex-direction: column;
+    gap: .1rem;
+    padding-top: .1rem;
+  }
+  .anchor .p { font-weight: 600; font-size: .92rem; letter-spacing: -.02em; }
+  .anchor .r { font-size: .68rem; color: var(--muted); letter-spacing: .04em; }
+
+  .cands { display: flex; flex-direction: column; gap: .3rem; }
+  .cand {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+    font-size: .92rem;
+  }
+  .cand .name { font-weight: 600; }
+  .cand .pos {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .68rem;
+    color: var(--muted);
+  }
+  .cand .por {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem;
+    color: var(--muted);
+    margin-left: auto;
+  }
+  .cand .pct {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem;
+    font-weight: 600;
+    width: 3rem;
+    text-align: right;
+  }
+  .cand.hi .pct { color: var(--accent); }
+  .cand.lo .pct { color: var(--danger); }
+
+  .pill {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .62rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: .18rem .4rem;
+    border-radius: .3rem;
+    transform: translateY(-1px);
+  }
+  .pill.target { background: var(--accent-soft); color: var(--accent); }
+  .pill.fade { background: var(--danger-soft); color: var(--danger); }
+  .pill.hold { background: var(--warn-soft); color: var(--warn); }
+
+  .rules { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  .rule {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: .6rem;
+    padding: 1rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+  }
+  .rule h3 {
+    margin: 0;
+    font-family: "Archivo", sans-serif;
+    font-weight: 800;
+    font-size: 1rem;
+    letter-spacing: -.01em;
+  }
+  .rule p { margin: 0; font-size: .88rem; color: var(--muted); }
+
+  .tiers { display: flex; flex-direction: column; gap: .9rem; }
+  .postier { display: flex; flex-direction: column; gap: .3rem; }
+  .postier h3 {
+    margin: 0;
+    font-family: "Archivo", sans-serif;
+    font-weight: 800;
+    font-size: .9rem;
+    letter-spacing: .02em;
+  }
+  .trow {
+    display: grid;
+    grid-template-columns: 2.4rem 1fr;
+    gap: .6rem;
+    font-size: .86rem;
+    padding: .32rem 0;
+    border-top: 1px dotted var(--hairline);
+  }
+  .trow .t {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-weight: 600;
+    color: var(--accent);
+    font-size: .78rem;
+  }
+  .trow .who { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .trow .who .num { color: var(--muted); }
+  .trow.cliff .t { color: var(--danger); }
+
+  .listcard {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: .6rem;
+    padding: 1rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+  .listcard h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-family: "Archivo", sans-serif;
+    font-weight: 800;
+    font-size: .95rem;
+  }
+  .listcard p { margin: 0; font-size: .88rem; color: var(--muted); }
+  .listcard p .names { color: var(--ink); }
+
+  details {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: .6rem;
+    padding: .3rem 1rem;
+    box-shadow: var(--shadow);
+  }
+  summary {
+    cursor: pointer;
+    padding: .7rem 0;
+    font-family: "Archivo", sans-serif;
+    font-weight: 700;
+    font-size: .95rem;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font-family: "IBM Plex Mono", monospace; color: var(--muted); }
+  details[open] summary::after { content: "–"; }
+  details[open] summary { border-bottom: 1px solid var(--hairline); margin-bottom: .8rem; }
+  .endbody { display: flex; flex-direction: column; gap: .8rem; padding-bottom: .9rem; }
+  .endbody p { margin: 0; font-size: .88rem; color: var(--muted); }
+  .endbody strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    color: var(--muted);
+    line-height: 1.5;
+    border-top: 1px solid var(--hairline);
+    padding-top: 1rem;
+  }
+
+  a { color: var(--accent); }
+  [hidden] { display: none !important; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  @media (max-width: 34rem) {
+    .tiles { grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
+    .tile { padding: .6rem .5rem; }
+    .rules { grid-template-columns: 1fr; }
+    .pick { grid-template-columns: 3.8rem 1fr; gap: .7rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="kicker">ESPN · going-deep warehouse</p>
+    <h1 id="title">ESPN Draft Sheet</h1>
+    <div class="spec">
+      <span>10 teams</span><span>1QB</span><span>full PPR</span><span>20 rounds</span><span>starts a punter</span><span>2026</span>
+    </div>
+    <div class="seatbox">
+      <p>ESPN randomizes the pick order ~1 hour before the draft. Tap your seat below the moment it's shown — everything on this page updates for it. Not tapped yet, it's showing seat 1.</p>
+      <div class="seats" id="seatpicker"></div>
+    </div>
+    <div class="ladder" id="ladder" aria-label="This seat's picks, rounds 1-5"></div>
+  </header>
+
+  <section>
+    <h2>The plan</h2>
+    <p class="thesis">Rounds 1–5: <em>2 RB · 2 WR · 1 TE</em>. QB is flexible — take one in the mix if the value is there, never forced.</p>
+    <p class="thesis-sub">This composition (or a close 1QB-in-the-mix variant) is #1 at every one of the 10 possible seats — 300 simulated drafts each — and lands in the top statistically-supported cluster of the league-wide 81,000-draft field study too. Unlike the superflex league, there's no QB run to chase: this league starts one QB, so a second carries no scarcity premium.</p>
+    <div class="tiles">
+      <div class="tile"><span class="n" id="tile-pts">—</span><span class="l">starter pts vs field, this seat</span></div>
+      <div class="tile"><span class="n" id="tile-win">—</span><span class="l">win rate</span></div>
+      <div class="tile"><span class="n" id="tile-top3">—</span><span class="l">top-third finish rate</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Pick by pick — best still likely there</h2>
+    <p class="thesis-sub" style="margin-top:-.6rem">Not a script — a target. Take the best RB/WR on the board, work toward 2 RB / 2 WR / 1 TE, and let the % (survival to that pick) tell you how much of a reach anything is. K/P/DST are excluded here on purpose — see Endgame below.</p>
+    <div class="picks" id="pickrows"></div>
+  </section>
+
+  <section>
+    <h2>Two hard rules</h2>
+    <div class="rules">
+      <div class="rule">
+        <h3>Compare POR. Take the bigger number.</h3>
+        <p>Same rule as the Sleeper sheet: when two positions are close, take whichever number in the tiers below is actually bigger for what's on the board right now, not whichever position "feels" like the pick.</p>
+      </div>
+      <div class="rule">
+        <h3><span class="pill fade">fade</span> Unproven-Veteran WRs</h3>
+        <p>Never-elite, 27+ or 7+ years pro. −3.8 pts under ADP over 8 seasons in this league (t = −4.0) — the one reliable negative signal here too. Take an Unproven-Youth WR instead.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tiers · points over replacement</h2>
+    <div class="tiers">
+
+      <div class="postier">
+        <h3>RB</h3>
+        <div class="trow"><span class="t">T1</span><span class="who">Gibbs <span class="num">163</span> · Bijan <span class="num">157</span></span></div>
+        <div class="trow"><span class="t">T2</span><span class="who">J.Taylor <span class="num">105</span> · Achane <span class="num">97</span> · CMC <span class="num">91</span> · Cook <span class="num">81</span></span></div>
+        <div class="trow"><span class="t">T3</span><span class="who">C.Brown <span class="num">72</span> · Saquon <span class="num">68</span> · Jeanty <span class="num">63</span> · J.Love <span class="num">63</span> · Walker <span class="num">60</span> · Henry <span class="num">58</span> · Hall <span class="num">52</span></span></div>
+        <div class="trow"><span class="t">T4</span><span class="who">Etienne <span class="num">35</span> · Swift <span class="num">32</span> · Kyren <span class="num">29</span> · Hampton <span class="num">23</span></span></div>
+        <div class="trow"><span class="t">T5</span><span class="who">Irving <span class="num">19</span> · Judkins <span class="num">10</span> · J.Williams <span class="num">9</span></span></div>
+      </div>
+
+      <div class="postier">
+        <h3>WR</h3>
+        <div class="trow"><span class="t">T1</span><span class="who">Puka <span class="num">137</span> · Chase <span class="num">137</span> · JSN <span class="num">129</span> · ARSB <span class="num">128</span></span></div>
+        <div class="trow"><span class="t">T2</span><span class="who">CeeDee <span class="num">97</span> · London <span class="num">90</span></span></div>
+        <div class="trow"><span class="t">T3</span><span class="who">Jefferson <span class="num">59</span> · Flowers <span class="num">55</span> · Pickens <span class="num">54</span> · A.Brown <span class="num">53</span> · D.Smith <span class="num">48</span></span></div>
+        <div class="trow"><span class="t">T4</span><span class="who">N.Collins <span class="num">40</span> · McMillan <span class="num">39</span> · Olave <span class="num">37</span> · Higgins <span class="num">29</span> · G.Wilson <span class="num">29</span> · Egbuka <span class="num">28</span> · McLaurin <span class="num">28</span></span></div>
+        <div class="trow"><span class="t">T5</span><span class="who">McConkey <span class="num">25</span> · Adams <span class="num">22</span></span></div>
+      </div>
+
+      <div class="postier">
+        <h3>QB — one slot only, no rush</h3>
+        <div class="trow"><span class="t">T1</span><span class="who">Allen <span class="num">59</span></span></div>
+        <div class="trow"><span class="t">T2</span><span class="who">Lamar <span class="num">39</span> · Hurts <span class="num">31</span> · Purdy <span class="num">24</span> · Daniels <span class="num">22</span> · Maye <span class="num">21</span> · Caleb <span class="num">18</span></span></div>
+        <div class="trow"><span class="t">T3</span><span class="who">Goff <span class="num">13</span> · Dart <span class="num">11</span> · Mahomes <span class="num">4</span> · Dak <span class="num">0</span></span></div>
+        <div class="trow cliff"><span class="t">↓</span><span class="who">replacement level and below from here</span></div>
+      </div>
+
+      <div class="postier">
+        <h3>TE</h3>
+        <div class="trow"><span class="t">T1</span><span class="who">McBride <span class="num">88</span> · Bowers <span class="num">73</span></span></div>
+        <div class="trow cliff"><span class="t">↓</span><span class="who">31-pt cliff</span></div>
+        <div class="trow"><span class="t">T2</span><span class="who">T.Warren <span class="num">42</span> · Loveland <span class="num">40</span></span></div>
+        <div class="trow"><span class="t">T3</span><span class="who">Kelce <span class="num">33</span> · Fannin <span class="num">23</span> · Kittle <span class="num">20</span> · LaPorta <span class="num">17</span> · Pitts <span class="num">16</span></span></div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Targets</h2>
+    <div class="listcard">
+      <h3><span class="pill target">target</span> Proven-Prime RB · +11.9 vs ADP</h3>
+      <p>Young or in-prime <em>and</em> already has an elite finish (t = 1.72, this league's own 8-season data). <span class="names">Gibbs, Bijan, J. Taylor, Achane, CMC, Chase Brown, Jeanty, Kenneth Walker III, Bucky Irving.</span></p>
+    </div>
+    <div class="listcard">
+      <h3>Why QB is different here</h3>
+      <p>QBs still never bust — the same 0% bust rate across every archetype the Sleeper sheet found. What's different is the payoff: one QB slot means a second quarterback earns no scarcity premium, so unlike the superflex league there's no forced QB run. Take Allen if he somehow falls; otherwise the whole T2/T3 QB group is close enough in value that waiting costs little.</p>
+    </div>
+  </section>
+
+  <details>
+    <summary>Endgame notes</summary>
+    <div class="endbody">
+      <p><strong>K, P and DST are held until round 18.</strong> This league starts three "late" slots the live tool reserves one round each for, counted back from the end — K + P + DST (Sleeper's league has no punter, hence only 2 there; this one's reserve is 3 of 20 rounds). Every K/P/DST is realistically still on the board that late. The live tool hides all three until then; type <code>k</code>, <code>p</code> or <code>dst</code> to override.</p>
+      <p><strong>The value window is rounds 1–14, not 15+.</strong> Grouped by ADP-implied round, the best available POR stays clearly positive (18–163) through round 14, goes flat and noisy through the mid-teens, and sits at roughly 0–5 pts from round 18 on — right where K/P/DST unlock. A 10-team league's pool just drains slower per round than a 14-team one, which is why this window runs later than the Sleeper sheet's (rounds 6–9 there).</p>
+      <p><strong>Primary tool on draft night is <code>src.draft.live_espn</code> over SSH</strong> — it resolves your seat automatically the moment ESPN reveals it (no manual entry needed) and ranks live by cost of waiting, not a static table. This page is the offline backup: if the SSH session drops or the phone's signal does, tap your seat above and keep drafting off this.</p>
+    </div>
+  </details>
+
+  <footer id="footer">
+    Built from the going-deep warehouse — draft_plans (300 sims/opening/seat), draft_availability (survival to each pick), draft_board (POR), draft_strategy_summary (league-wide field study). All 10 seats precomputed since ESPN doesn't draw the order until ~1hr before start. Numbers fixed at the last warehouse rebuild; not recomputed live.
+  </footer>
+
+</div>
+
+<script>
+  var CANDIDATES = {1:[["Jahmyr Gibbs", "RB", 163, 100], ["Bijan Robinson", "RB", 157, 100], ["Puka Nacua", "WR", 137, 100], ["Ja'Marr Chase", "WR", 137, 100], ["Jaxon Smith-Njigba", "WR", 129, 100]],2:[["Jahmyr Gibbs", "RB", 163, 50], ["Bijan Robinson", "RB", 157, 67], ["Puka Nacua", "WR", 137, 100], ["Ja'Marr Chase", "WR", 137, 100], ["Jaxon Smith-Njigba", "WR", 129, 100]],3:[["Puka Nacua", "WR", 137, 98], ["Ja'Marr Chase", "WR", 137, 96], ["Jaxon Smith-Njigba", "WR", 129, 100], ["Amon-Ra St. Brown", "WR", 128, 100], ["Jonathan Taylor", "RB", 105, 100]],4:[["Puka Nacua", "WR", 137, 87], ["Ja'Marr Chase", "WR", 137, 76], ["Jaxon Smith-Njigba", "WR", 129, 100], ["Amon-Ra St. Brown", "WR", 128, 100], ["Jonathan Taylor", "RB", 105, 94]],5:[["Puka Nacua", "WR", 137, 56], ["Ja'Marr Chase", "WR", 137, 38], ["Jaxon Smith-Njigba", "WR", 129, 98], ["Amon-Ra St. Brown", "WR", 128, 100], ["Jonathan Taylor", "RB", 105, 84]],6:[["Jaxon Smith-Njigba", "WR", 129, 87], ["Amon-Ra St. Brown", "WR", 128, 100], ["Jonathan Taylor", "RB", 105, 66], ["De'Von Achane", "RB", 97, 99], ["CeeDee Lamb", "WR", 97, 100]],7:[["Jaxon Smith-Njigba", "WR", 129, 59], ["Amon-Ra St. Brown", "WR", 128, 99], ["Jonathan Taylor", "RB", 105, 43], ["De'Von Achane", "RB", 97, 97], ["CeeDee Lamb", "WR", 97, 100]],8:[["Amon-Ra St. Brown", "WR", 128, 96], ["De'Von Achane", "RB", 97, 91], ["CeeDee Lamb", "WR", 97, 100], ["Drake London", "WR", 90, 100], ["Trey McBride", "TE", 88, 100]],9:[["Amon-Ra St. Brown", "WR", 128, 84], ["De'Von Achane", "RB", 97, 79], ["CeeDee Lamb", "WR", 97, 99], ["Drake London", "WR", 90, 100], ["Trey McBride", "TE", 88, 100]],10:[["Amon-Ra St. Brown", "WR", 128, 59], ["De'Von Achane", "RB", 97, 60], ["CeeDee Lamb", "WR", 97, 97], ["Drake London", "WR", 90, 100], ["Trey McBride", "TE", 88, 100]],11:[["De'Von Achane", "RB", 97, 38], ["CeeDee Lamb", "WR", 97, 90], ["Drake London", "WR", 90, 100], ["Trey McBride", "TE", 88, 100], ["James Cook", "RB", 81, 36]],12:[["CeeDee Lamb", "WR", 97, 75], ["Drake London", "WR", 90, 100], ["Trey McBride", "TE", 88, 100], ["Brock Bowers", "TE", 73, 100], ["Chase Brown", "RB", 72, 89]],13:[["CeeDee Lamb", "WR", 97, 54], ["Drake London", "WR", 90, 99], ["Trey McBride", "TE", 88, 100], ["Brock Bowers", "TE", 73, 100], ["Chase Brown", "RB", 72, 80]],14:[["CeeDee Lamb", "WR", 97, 31], ["Drake London", "WR", 90, 97], ["Trey McBride", "TE", 88, 100], ["Brock Bowers", "TE", 73, 100], ["Chase Brown", "RB", 72, 66]],15:[["Drake London", "WR", 90, 90], ["Trey McBride", "TE", 88, 100], ["Brock Bowers", "TE", 73, 100], ["Chase Brown", "RB", 72, 50], ["Saquon Barkley", "RB", 68, 74]],16:[["Drake London", "WR", 90, 78], ["Trey McBride", "TE", 88, 100], ["Brock Bowers", "TE", 73, 98], ["Chase Brown", "RB", 72, 34], ["Saquon Barkley", "RB", 68, 64]],17:[["Drake London", "WR", 90, 59], ["Trey McBride", "TE", 88, 100], ["Brock Bowers", "TE", 73, 97], ["Saquon Barkley", "RB", 68, 52], ["Ashton Jeanty", "RB", 63, 37]],18:[["Drake London", "WR", 90, 39], ["Trey McBride", "TE", 88, 95], ["Brock Bowers", "TE", 73, 96], ["Saquon Barkley", "RB", 68, 41], ["Jeremiyah Love", "RB", 63, 100]],19:[["Trey McBride", "TE", 88, 93], ["Brock Bowers", "TE", 73, 95], ["Jeremiyah Love", "RB", 63, 97], ["Kenneth Walker III", "RB", 60, 72], ["Josh Allen", "QB", 59, 80]],20:[["Trey McBride", "TE", 88, 89], ["Brock Bowers", "TE", 73, 93], ["Jeremiyah Love", "RB", 63, 94], ["Kenneth Walker III", "RB", 60, 63], ["Josh Allen", "QB", 59, 76]],21:[["Trey McBride", "TE", 88, 84], ["Brock Bowers", "TE", 73, 91], ["Jeremiyah Love", "RB", 63, 90], ["Kenneth Walker III", "RB", 60, 53], ["Josh Allen", "QB", 59, 72]],22:[["Trey McBride", "TE", 88, 78], ["Brock Bowers", "TE", 73, 88], ["Jeremiyah Love", "RB", 63, 84], ["Kenneth Walker III", "RB", 60, 43], ["Josh Allen", "QB", 59, 68]],23:[["Trey McBride", "TE", 88, 71], ["Brock Bowers", "TE", 73, 85], ["Jeremiyah Love", "RB", 63, 76], ["Kenneth Walker III", "RB", 60, 33], ["Josh Allen", "QB", 59, 63]],24:[["Trey McBride", "TE", 88, 63], ["Brock Bowers", "TE", 73, 82], ["Jeremiyah Love", "RB", 63, 66], ["Josh Allen", "QB", 59, 59], ["Zay Flowers", "WR", 55, 100]],25:[["Trey McBride", "TE", 88, 55], ["Brock Bowers", "TE", 73, 78], ["Jeremiyah Love", "RB", 63, 55], ["Josh Allen", "QB", 59, 54], ["Zay Flowers", "WR", 55, 100]],26:[["Trey McBride", "TE", 88, 46], ["Brock Bowers", "TE", 73, 74], ["Jeremiyah Love", "RB", 63, 43], ["Josh Allen", "QB", 59, 49], ["Zay Flowers", "WR", 55, 99]],27:[["Trey McBride", "TE", 88, 37], ["Brock Bowers", "TE", 73, 69], ["Jeremiyah Love", "RB", 63, 32], ["Josh Allen", "QB", 59, 44], ["Zay Flowers", "WR", 55, 99]],28:[["Brock Bowers", "TE", 73, 64], ["Josh Allen", "QB", 59, 39], ["Zay Flowers", "WR", 55, 97], ["Breece Hall", "RB", 52, 82], ["DeVonta Smith", "WR", 48, 100]],29:[["Brock Bowers", "TE", 73, 59], ["Josh Allen", "QB", 59, 34], ["Zay Flowers", "WR", 55, 95], ["Breece Hall", "RB", 52, 75], ["DeVonta Smith", "WR", 48, 100]],30:[["Brock Bowers", "TE", 73, 53], ["Zay Flowers", "WR", 55, 92], ["Breece Hall", "RB", 52, 66], ["DeVonta Smith", "WR", 48, 99], ["Tyler Warren", "TE", 42, 100]],31:[["Brock Bowers", "TE", 73, 48], ["Zay Flowers", "WR", 55, 87], ["Breece Hall", "RB", 52, 56], ["DeVonta Smith", "WR", 48, 98], ["Tyler Warren", "TE", 42, 100]],32:[["Brock Bowers", "TE", 73, 42], ["Zay Flowers", "WR", 55, 80], ["Breece Hall", "RB", 52, 47], ["DeVonta Smith", "WR", 48, 97], ["Tyler Warren", "TE", 42, 100]],33:[["Brock Bowers", "TE", 73, 37], ["Zay Flowers", "WR", 55, 72], ["Breece Hall", "RB", 52, 37], ["DeVonta Smith", "WR", 48, 94], ["Tyler Warren", "TE", 42, 100]],34:[["Brock Bowers", "TE", 73, 32], ["Zay Flowers", "WR", 55, 61], ["DeVonta Smith", "WR", 48, 89], ["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 96]],35:[["Zay Flowers", "WR", 55, 51], ["DeVonta Smith", "WR", 48, 83], ["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 96], ["Tetairoa McMillan", "WR", 39, 68]],36:[["Zay Flowers", "WR", 55, 40], ["DeVonta Smith", "WR", 48, 75], ["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 94], ["Tetairoa McMillan", "WR", 39, 56]],37:[["DeVonta Smith", "WR", 48, 64], ["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 93], ["Tetairoa McMillan", "WR", 39, 45], ["Lamar Jackson", "QB", 39, 85]],38:[["DeVonta Smith", "WR", 48, 53], ["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 92], ["Tetairoa McMillan", "WR", 39, 33], ["Lamar Jackson", "QB", 39, 82]],39:[["DeVonta Smith", "WR", 48, 41], ["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 90], ["Lamar Jackson", "QB", 39, 79], ["Travis Etienne", "RB", 35, 42]],40:[["DeVonta Smith", "WR", 48, 30], ["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 88], ["Lamar Jackson", "QB", 39, 75], ["Travis Etienne", "RB", 35, 34]],41:[["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 86], ["Lamar Jackson", "QB", 39, 71], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 93]],42:[["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 84], ["Lamar Jackson", "QB", 39, 67], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 90]],43:[["Tyler Warren", "TE", 42, 100], ["Colston Loveland", "TE", 40, 81], ["Lamar Jackson", "QB", 39, 63], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 85]],44:[["Tyler Warren", "TE", 42, 98], ["Colston Loveland", "TE", 40, 78], ["Lamar Jackson", "QB", 39, 58], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 80]],45:[["Tyler Warren", "TE", 42, 98], ["Colston Loveland", "TE", 40, 75], ["Lamar Jackson", "QB", 39, 54], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 73]],46:[["Tyler Warren", "TE", 42, 97], ["Colston Loveland", "TE", 40, 71], ["Lamar Jackson", "QB", 39, 49], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 66]],47:[["Tyler Warren", "TE", 42, 96], ["Colston Loveland", "TE", 40, 68], ["Lamar Jackson", "QB", 39, 44], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 57]],48:[["Tyler Warren", "TE", 42, 95], ["Colston Loveland", "TE", 40, 64], ["Lamar Jackson", "QB", 39, 39], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 49]],49:[["Tyler Warren", "TE", 42, 94], ["Colston Loveland", "TE", 40, 60], ["Lamar Jackson", "QB", 39, 35], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 40]],50:[["Tyler Warren", "TE", 42, 93], ["Colston Loveland", "TE", 40, 56], ["Lamar Jackson", "QB", 39, 31], ["Travis Kelce", "TE", 33, 100], ["D'Andre Swift", "RB", 32, 32]]};
+
+  var SEAT_STATS = {1:[52.4, 27, 67],2:[52.3, 32, 69],3:[36.6, 22, 48],4:[35.5, 19, 47],5:[24.1, 13, 41],6:[23.6, 15, 42],7:[19.6, 12, 37],8:[11.5, 10, 38],9:[17.2, 13, 34],10:[15.4, 11, 36]};
+
+  var TEAM_COUNT = 10;
+  function picksForSeat(seat) {
+    var out = [];
+    for (var r = 1; r <= 5; r++) {
+      var within = (r % 2 === 1) ? seat : (TEAM_COUNT - seat + 1);
+      out.push((r - 1) * TEAM_COUNT + within);
+    }
+    return out;
+  }
+
+  function render(seat) {
+    document.getElementById('title').textContent = 'Seat ' + seat + ' Draft Sheet';
+    document.querySelectorAll('.seatbtn').forEach(function (b) {
+      b.classList.toggle('active', Number(b.dataset.seat) === seat);
+    });
+
+    var picks = picksForSeat(seat);
+    var ladder = document.getElementById('ladder');
+    ladder.innerHTML = '';
+    picks.forEach(function (p, i) {
+      var el = document.createElement('span');
+      el.className = 'rung' + (i === 0 ? ' first' : '');
+      el.innerHTML = '<b>' + p + '</b><i>R' + (i + 1) + '</i>';
+      ladder.appendChild(el);
+    });
+
+    var stats = SEAT_STATS[seat];
+    document.getElementById('tile-pts').textContent = '+' + stats[0];
+    document.getElementById('tile-win').textContent = stats[1] + '%';
+    document.getElementById('tile-top3').textContent = stats[2] + '%';
+
+    var rows = document.getElementById('pickrows');
+    rows.innerHTML = '';
+    picks.forEach(function (pickNo, i) {
+      var row = document.createElement('div');
+      row.className = 'pick';
+
+      var anchor = document.createElement('div');
+      anchor.className = 'anchor';
+      anchor.innerHTML = '<span class="p">' + pickNo + '</span><span class="r">RD ' + (i + 1) + '</span>';
+
+      var cands = document.createElement('div');
+      cands.className = 'cands';
+      (CANDIDATES[pickNo] || []).forEach(function (c) {
+        var name = c[0], pos = c[1], por = c[2], pct = c[3];
+        var cand = document.createElement('div');
+        cand.className = 'cand ' + (pct >= 70 ? 'hi' : (pct < 45 ? 'lo' : ''));
+        cand.innerHTML =
+          '<span class="name">' + name + '</span>' +
+          '<span class="pos">' + pos + '</span>' +
+          '<span class="por">' + por + ' por</span>' +
+          '<span class="pct">' + pct + '%</span>';
+        cands.appendChild(cand);
+      });
+
+      row.appendChild(anchor);
+      row.appendChild(cands);
+      rows.appendChild(row);
+    });
+  }
+
+  var picker = document.getElementById('seatpicker');
+  for (var s = 1; s <= 10; s++) {
+    var btn = document.createElement('button');
+    btn.className = 'seatbtn';
+    btn.dataset.seat = s;
+    btn.textContent = s;
+    btn.addEventListener('click', function () { render(Number(this.dataset.seat)); });
+    picker.appendChild(btn);
+  }
+
+  render(1);
+</script>

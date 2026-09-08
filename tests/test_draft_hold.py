@@ -9,13 +9,22 @@ What the ranking is missing is a term, not a correction. Cost of waiting prices 
 position will still be sitting there in round 14 while the receiver next to it will not. So the
 answer is not to reprice anything — it is to stop asking the question until the answer matters.
 
-## Why the round is derived rather than typed
+## Why the round is derived rather than typed, and why the reserve is three rounds per slot
 
-"The last two rounds" is the right answer for this league and is the wrong shape of answer. It is
-right because fifteen rounds with one K slot and one DST slot leaves exactly two picks that have
-to be spent on them; change either number and the sentence stops being true while the constant
-stays. So the reserve is read off `league["slots"]` — one round per slot the league actually
-starts — and the last-two-rounds answer falls out of it here rather than being asserted.
+"The last six rounds" is the right answer for this league and is the wrong shape of answer. It is
+right because fifteen rounds with one K slot and one DST slot, reserved three rounds each, leaves
+the last six for them; change either number and the sentence stops being true while the constant
+stays. So the reserve is read off `league["slots"]` — `hold.RESERVE_ROUNDS_PER_SLOT` per slot the
+league actually starts — and round 10 falls out of it here rather than being asserted.
+
+The reserve started at one round per slot (the minimum that still guarantees room to fill every
+late slot), moved to two after replaying one ESPN draft (2025), and settled at three after checking
+that finding against this league's full draft history instead of a single season: four years of
+real K/P/DST picks, pooled, show them clustering into one specialist run with no meaningful stagger
+by position — 10% by round 12, a quarter by round 13. Two other candidates (external market ADP,
+and this league's own points-over-replacement) each argued for staggering K/P/DST apart instead, and
+both were contradicted by that same real history. See `hold.py`'s own docstring for the full
+reasoning.
 
 `draft_plans` was checked first, as the ticket asked, and has nothing to say: every plan in the
 table is a five-pick opening of QB/RB/WR/TE, and the simulation never takes a kicker at all.
@@ -90,52 +99,54 @@ def test_kickers_and_defenses_are_held_off_the_board_early_in_the_draft():
     assert hold["positions"] == ["K", "DST"]
 
 
-# 2. The round they come back is one per late slot the league starts, counted from the end. In this
-# league that is round 14 of 15 — the ticket's answer, arrived at rather than typed.
-def test_they_come_back_with_one_round_left_for_each_late_slot_the_league_starts():
+# 2. The round they come back is three per late slot the league starts, counted from the end. In
+# this league that is round 10 of 15 — arrived at rather than typed.
+def test_they_come_back_with_three_rounds_left_for_each_late_slot_the_league_starts():
     hold = held_positions(turn(85), LEAGUE)
 
-    assert hold["from_round"] == 14
+    assert hold["from_round"] == 10
 
 
-# 3. And the reserve is genuinely read off the league: a second defense costs a third round.
-def test_a_league_starting_two_defenses_gets_them_back_a_round_earlier():
-    hold = held_positions(turn(85), league(slots={**SLOTS, "DST": 2}))
+# 3. And the reserve is genuinely read off the league: a second defense costs three more rounds.
+# Round 1, since this variant's own from_round (7) is earlier than turn(85)'s round (7 itself).
+def test_a_league_starting_two_defenses_gets_them_back_three_rounds_earlier():
+    hold = held_positions(turn(1), league(slots={**SLOTS, "DST": 2}))
 
-    assert hold["from_round"] == 13
+    assert hold["from_round"] == 7
 
 
 # 4. The boundary, held side. The last round before the reserve still shows a full board.
 def test_the_round_before_the_reserve_still_holds_them():
-    hold = held_positions(turn(169), LEAGUE)
+    hold = held_positions(turn(126), LEAGUE)  # round 9 of 15
 
     assert hold["positions"] == ["K", "DST"]
 
 
-# 5. The boundary, released side. Seat 1's round-14 turn is pick 196, and nothing is held from it.
+# 5. The boundary, released side. Round 10's first pick, 127, is where the reserve begins.
 def test_the_first_round_of_the_reserve_releases_them():
-    hold = held_positions(turn(196), LEAGUE)
+    hold = held_positions(turn(127), LEAGUE)  # round 10 of 15
 
     assert hold["positions"] == []
     assert hold["from_round"] is None
 
 
-# 6. Counted from the end rather than fixed at 14: a longer draft holds them for longer.
+# 6. Counted from the end rather than fixed: a longer draft holds them for longer, so the same pick
+# that releases them in the base league (127, round 10) is still held here.
 def test_a_longer_draft_holds_them_a_round_longer():
-    hold = held_positions(turn(196), league(rounds=16))
+    hold = held_positions(turn(127), league(rounds=16))
 
     assert hold["positions"] == ["K", "DST"]
-    assert hold["from_round"] == 15
+    assert hold["from_round"] == 11
 
 
 # 7. The punter, which the ESPN league starts and this one does not. Both halves of the rule in one
 # case: a started late slot is held and counts toward the reserve.
-def test_a_league_that_starts_a_punter_holds_him_too_and_reserves_a_round_for_him():
+def test_a_league_that_starts_a_punter_holds_him_too_and_reserves_rounds_for_him():
     espn = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "K": 1, "P": 1, "DST": 1}
-    hold = held_positions(turn(85), league(team_count=10, slots=espn))
+    hold = held_positions(turn(55), league(team_count=10, slots=espn))  # round 6 of 15
 
     assert hold["positions"] == ["K", "DST", "P"]
-    assert hold["from_round"] == 13
+    assert hold["from_round"] == 7
 
 
 # 8. And the other half: a slot the league does not start is never named. Same rule the roster
@@ -294,7 +305,7 @@ def test_the_depth_block_stops_reporting_them_too():
     assert depth_positions(drawn(84)) == ["RB", "WR", "TE"]
 
 
-# 18. Round 14, and both are back — with two picks left and two slots to fill, they are the pick.
+# 18. Round 14 — past the release round — and both are back on the board.
 def test_in_the_last_rounds_both_come_back():
     out = drawn(169)
 

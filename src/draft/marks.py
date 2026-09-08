@@ -62,8 +62,10 @@ import re
 
 import pandas as pd
 
-# What a mark carries: the two identities, and the three fields that name a player on screen.
-MARK_COLUMNS = ["player_id", "sleeper_id", "player_name", "position", "team"]
+# What a mark carries: the two identities, and the three fields that name a player on screen. The
+# second identity is `id_column` — `sleeper_id` by default, `espn_id` for the ESPN edge — since
+# every function below reads whichever platform ID the board it's given actually carries.
+BASE_MARK_COLUMNS = ["player_id", "player_name", "position", "team"]
 
 # Typed in front of a name to take a mark back. A leading dash rather than a word because it is
 # the fewest keystrokes that cannot be the start of a player's name.
@@ -86,9 +88,9 @@ def _plain(name) -> str:
     return " ".join(re.sub(r"[^\w ]", "", text).split())
 
 
-def _rows(board: pd.DataFrame) -> list[dict]:
+def _rows(board: pd.DataFrame, id_column: str) -> list[dict]:
     """The board as plain rows, cut to what a mark carries. The frame itself is never touched."""
-    return board[MARK_COLUMNS].to_dict("records")
+    return board[[*BASE_MARK_COLUMNS, id_column]].to_dict("records")
 
 
 def _matching(typed: str, rows: list[dict]) -> list[dict]:
@@ -119,13 +121,15 @@ def _nothing(message: str) -> dict:
     return {"action": "none", "player": None, "message": message}
 
 
-def _mark(typed: str, board: pd.DataFrame, marked: dict) -> dict:
+def _mark(
+    typed: str, board: pd.DataFrame, marked: dict, id_column: str, platform_label: str
+) -> dict:
     """Resolve a typed name against the board, or refuse it saying why."""
     wanted = _plain(typed)
     if not wanted:
         return _nothing("type at least part of a player's name to mark him taken")
 
-    found = _matching(wanted, _rows(board))
+    found = _matching(wanted, _rows(board, id_column))
     if not found:
         return _nothing(f'no player on the board matches "{typed}" — nobody has been marked')
     if len(found) > 1:
@@ -137,11 +141,11 @@ def _mark(typed: str, board: pd.DataFrame, marked: dict) -> dict:
     player = found[0]
     if player["player_id"] in marked:
         return _nothing(f"{player['player_name']} is already marked taken by hand")
-    if pd.isna(player["sleeper_id"]) or not str(player["sleeper_id"]).strip():
+    if pd.isna(player[id_column]) or not str(player[id_column]).strip():
         return _nothing(
-            f"{player['player_name']} has no Sleeper ID on this board, so a hand-mark could not "
-            "be told apart from his own pick — nobody has been marked. He needs an identity "
-            "override and a rebuild, not a mark."
+            f"{player['player_name']} has no {platform_label} ID on this board, so a hand-mark "
+            "could not be told apart from his own pick — nobody has been marked. He needs an "
+            "identity override and a rebuild, not a mark."
         )
     return {
         "action": "mark",
@@ -178,10 +182,19 @@ def _unmark(typed: str, marked: dict) -> dict:
     }
 
 
-def read_mark(typed: str, board: pd.DataFrame, marked: dict) -> dict:
+def read_mark(
+    typed: str,
+    board: pd.DataFrame,
+    marked: dict,
+    id_column: str = "sleeper_id",
+    platform_label: str = "Sleeper",
+) -> dict:
     """One line the drafter typed, read against the board and the marks already made.
 
-    `marked` is the hand-marked players so far, keyed by the board's own `player_id`. Returns:
+    `marked` is the hand-marked players so far, keyed by the board's own `player_id`. `id_column`
+    and `platform_label` name whichever platform ID the board carries (`sleeper_id`/"Sleeper" by
+    default; `live_espn.py` passes `espn_id`/"ESPN") — the only two spots this function's refusal
+    for an unidentifiable player actually reads a platform-specific column. Returns:
 
     - `action` — `"mark"` to add the player to that set, `"unmark"` to take him out of it, and
       `"none"` when there is nothing to do.
@@ -192,34 +205,39 @@ def read_mark(typed: str, board: pd.DataFrame, marked: dict) -> dict:
     text = typed.strip()
     if text.startswith(UNMARK):
         return _unmark(text[len(UNMARK):].strip(), marked)
-    return _mark(text, board, marked)
+    return _mark(text, board, marked, id_column, platform_label)
 
 
-def as_picks(marked) -> list[dict]:
-    """The hand-marked players as picks payload entries, in the shape Sleeper's own arrive in.
+def _sleeper_pick_entry(player: dict, platform_id: str) -> dict:
+    """A hand-mark as a pick payload entry, in the shape Sleeper's own picks arrive in."""
+    first, _, last = str(player["player_name"]).partition(" ")
+    return {
+        "player_id": platform_id,
+        "roster_id": None,
+        "pick_no": None,
+        "metadata": {"first_name": first, "last_name": last, "position": player["position"]},
+    }
+
+
+def as_picks(marked, id_column: str = "sleeper_id", pick_entry=_sleeper_pick_entry) -> list[dict]:
+    """The hand-marked players as picks payload entries, in the shape the platform's own arrive in.
 
     No pick number, because the drafter knows a player is gone and not when — which is also what
     keeps a mark from advancing the draft. No roster, because a mark never claims a player for
-    anybody's lineup.
+    anybody's lineup. `pick_entry` builds that platform's own empty-pick shape from a board row and
+    its platform ID — `live_espn.py` passes one building ESPN's `playerId`/`teamId`/
+    `overallPickNumber` shape instead, so `espn_picks.ingest_picks` can parse a hand-mark exactly
+    like a real pick, the same as this default does for Sleeper's.
     """
-    entries = []
-    for player in marked:
-        first, _, last = str(player["player_name"]).partition(" ")
-        entries.append({
-            "player_id": str(player["sleeper_id"]),
-            "roster_id": None,
-            "pick_no": None,
-            "metadata": {
-                "first_name": first, "last_name": last, "position": player["position"]
-            },
-        })
-    return entries
+    return [pick_entry(player, player[id_column]) for player in marked]
 
 
-def combine(picks: list[dict], marked) -> list[dict]:
+def combine(
+    picks: list[dict], marked, id_column: str = "sleeper_id", pick_entry=_sleeper_pick_entry
+) -> list[dict]:
     """The API's picks with the hand-marked players unioned in, the API's first.
 
     First because `ingest_picks` keeps the first entry it sees for a player: a real pick, carrying
     its number and its roster, always wins over the hand-mark it has caught up with.
     """
-    return [*picks, *as_picks(marked)]
+    return [*picks, *as_picks(marked, id_column, pick_entry)]

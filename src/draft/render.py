@@ -143,12 +143,16 @@ def _marked(marked: list[dict]) -> list[str]:
     return lines
 
 
-def _unmatched(unmatched: list[dict]) -> list[str]:
+def _unmatched(
+    unmatched: list[dict], id_key: str = "sleeper_id", platform_label: str = "Sleeper"
+) -> list[str]:
     """The warning, or nothing at all when there is nothing wrong.
 
     Named rather than counted: "3 picks could not be matched" tells a drafter that something is
     wrong without telling him which player to distrust, and the name is the only part he can act
-    on in the ninety seconds he has.
+    on in the ninety seconds he has. `id_key`/`platform_label` name whichever platform ID an
+    unmatched entry carries — `espn_picks.ingest_picks` names its own `espn_id`, following the same
+    per-platform convention `picks.ingest_picks` already uses for `sleeper_id`.
     """
     if not unmatched:
         return []
@@ -164,7 +168,7 @@ def _unmatched(unmatched: list[dict]) -> list[str]:
         where = f"pick {number}" if number is not None else "hand-marked"
         lines.append(
             f"!!   {where:<14}{_text(pick.get('player_name'))} "
-            f"({_text(pick.get('position'))}, Sleeper {_text(pick.get('sleeper_id'))})"
+            f"({_text(pick.get('position'))}, {platform_label} {_text(pick.get(id_key))})"
         )
     return lines
 
@@ -377,6 +381,8 @@ def render_board(
     position: str | None = None,
     cliffs: pd.DataFrame | None = None,
     hold: dict | None = None,
+    id_key: str = "sleeper_id",
+    platform_label: str = "Sleeper",
 ) -> str:
     """The whole screen as one string.
 
@@ -410,10 +416,13 @@ def render_board(
     `hold` is what `held_positions` returned, or None for a screen holding nothing. The positions
     it names are already gone from both `candidates` and `cliffs`; this is what puts the reason on
     screen, so that a board with no kickers on it reads as a decision rather than as a loss.
+
+    `id_key`/`platform_label` name whichever platform ID an unmatched pick carries — see
+    `_unmatched`. Defaulted for Sleeper; `live_espn.py` passes `"espn_id"`/`"ESPN"`.
     """
     marked = list(marked)
     lines = [_header(picks, league, marked)]
-    lines += _unmatched(picks["unmatched"])
+    lines += _unmatched(picks["unmatched"], id_key, platform_label)
     lines += _marked(marked)
     lines += _roster(picks["roster"], league)
     lines += _guidance(guidance)

@@ -214,12 +214,14 @@ def find_draft(league_id: str, season: int) -> dict:
 def load_board(league_key: str = LEAGUE_KEY) -> pd.DataFrame:
     """One league's priced board, read-only, exactly as the last rebuild left it.
 
-    Only the columns the draft night needs: enough to recognise a pick (`sleeper_id`), to rank
-    what is left (`points_over_replacement`) and to show it (the rest).
+    Only the columns the draft night needs: enough to recognise a pick — both `sleeper_id` and
+    `espn_id`, since this is shared by both edges and each `ingest_picks` only reads the one its
+    platform's payload carries — to rank what is left (`points_over_replacement`) and to show it
+    (the rest).
     """
     board = q(
         """
-        SELECT player_id, sleeper_id, player_name, position, team,
+        SELECT player_id, sleeper_id, espn_id, player_name, position, team,
                points_over_replacement, bye_week
         FROM draft_board
         WHERE league_key = ?

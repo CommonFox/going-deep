@@ -46,19 +46,26 @@ from datetime import datetime
 _DOT = "  ·  "
 
 
-def fingerprint(picks: list[dict]) -> tuple:
+def fingerprint(
+    picks: list[dict], id_field: str = "player_id", number_field: str = "pick_no"
+) -> tuple:
     """What the board is made of right now, cheaply enough to compute every few seconds.
 
     Two payloads describing the same draft give equal fingerprints; anything that would change
     the board gives a different one. Compared, never inspected — the parts are meaningful only
     to the docstring above.
+
+    `id_field`/`number_field` name whichever raw pick-entry fields carry a player and a pick
+    number — Sleeper's `player_id`/`pick_no` by default; `live_espn.py` passes ESPN's own
+    `playerId`/`overallPickNumber`, since a fingerprint built from field names a payload doesn't
+    carry would never see anything as numbered and never redraw the board at all.
     """
-    numbered = [entry for entry in picks if entry.get("pick_no") is not None]
-    latest = max(numbered, key=lambda entry: entry["pick_no"], default=None)
+    numbered = [entry for entry in picks if entry.get(number_field) is not None]
+    latest = max(numbered, key=lambda entry: entry[number_field], default=None)
     return (
-        len({entry.get("player_id") for entry in picks}),
-        latest and latest.get("player_id"),
-        latest and latest.get("pick_no"),
+        len({entry.get(id_field) for entry in picks}),
+        latest and latest.get(id_field),
+        latest and latest.get(number_field),
     )
 
 
@@ -74,6 +81,7 @@ def status_line(
     checked_at: datetime | None,
     now: datetime,
     error: BaseException | None = None,
+    platform_label: str = "Sleeper",
 ) -> str:
     """The one live line under the board: how far the draft has got, and whether we can still see.
 
@@ -81,6 +89,7 @@ def status_line(
     module docstring. `now` is only used to say how stale that is once something has gone wrong.
     It is None only when nothing has succeeded yet, which is the tool being started while the
     connection is already down; the line says so rather than reporting a check that never happened.
+    `platform_label` names whoever didn't answer — "Sleeper" by default, "ESPN" from `live_espn.py`.
     """
     when = "not checked yet" if checked_at is None else f"last checked {checked_at:%H:%M:%S}"
     line = f"{made} picks made{_DOT}{when}"
@@ -88,4 +97,4 @@ def status_line(
         return line
 
     ago = "" if checked_at is None else f" ({_age((now - checked_at).total_seconds())} ago)"
-    return f"{line}{ago}{_DOT}Sleeper did not answer: {error} — retrying"
+    return f"{line}{ago}{_DOT}{platform_label} did not answer: {error} — retrying"
