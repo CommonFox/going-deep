@@ -104,6 +104,8 @@ import duckdb
 import pandas as pd
 
 from src import console
+from src.gold.espn_ids import report_unmapped as report_unmapped_espn
+from src.gold.espn_ids import resolve_espn_ids
 from src.gold.points_over_replacement import _SKILL_POSITIONS, _build_league_season
 from src.gold.sleeper_ids import report_unmapped, resolve_sleeper_ids
 from src.silver.teams import normalize_team
@@ -130,8 +132,8 @@ _STARTER_WEEKS_FOR_ROLE = 4
 _SCORING_BASES = {1.0: "ppr", 0.5: "half_ppr"}
 
 _OUTPUT_COLUMNS = [
-    "league_key", "season", "format", "scoring", "player_id", "sleeper_id", "player_name",
-    "position", "team", "bye_week",
+    "league_key", "season", "format", "scoring", "player_id", "sleeper_id", "espn_id",
+    "player_name", "position", "team", "bye_week",
     "ol_grade", "ol_tier",
     "projected_points", "projected_points_adjusted", "projected_floor", "projected_ceiling",
     "availability", "availability_source",
@@ -358,6 +360,22 @@ def _sleeper_defenses(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.execute("SELECT player_id FROM sleeper_players WHERE position = 'DEF'").df()
 
 
+def _espn_crosswalk(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """nflverse's player crosswalk, cut to the ESPN mapping — see `espn_ids` for why this and not
+    Sleeper's own `gsis_id` field, which the trap it's named after doesn't even apply to here: ESPN's
+    player export carries no `gsis_id` at all, only the crosswalk route is available."""
+    return con.execute(
+        "SELECT gsis_id, espn_id FROM ids WHERE gsis_id IS NOT NULL AND espn_id IS NOT NULL"
+    ).df()
+
+
+def _espn_defenses(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """ESPN's own D/ST rows, named ("Eagles D/ST") rather than keyed on a bare abbreviation."""
+    return con.execute(
+        'SELECT "id", "fullName" FROM espn_players WHERE "defaultPositionId" = 16'
+    ).df()
+
+
 def _team_context(con: duckdb.DuckDBPyConnection, season: int) -> pd.DataFrame:
     """Each player's team and the line he runs behind, graded before the season starts.
 
@@ -541,6 +559,8 @@ def _build_league(con: duckdb.DuckDBPyConnection, league: pd.Series, season: int
     # board-wide uniqueness check would report every player as colliding with himself.
     df = resolve_sleeper_ids(df, _sleeper_crosswalk(con), _sleeper_defenses(con))
     report_unmapped(df, league["league_key"])
+    df = resolve_espn_ids(df, _espn_crosswalk(con), _espn_defenses(con))
+    report_unmapped_espn(df, league["league_key"])
 
     return df[_OUTPUT_COLUMNS].sort_values("points_over_replacement", ascending=False)
 
