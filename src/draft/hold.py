@@ -1,4 +1,4 @@
-"""Keep the positions that will still be there in round 14 off the board until round 14.
+"""Keep the positions that will still be there late off the board until they are worth looking at.
 
 Pure, like everything in this package bar `live`: a turn, a league shape and a frame in, a decision
 and a shorter frame out. No network, no warehouse connection, no printing, and nothing handed in
@@ -22,15 +22,46 @@ screen until the round in which it has an answer worth having.
 
 ## The round is read off the league, not typed here
 
-"The last two rounds" is the right answer for this league and the wrong shape of answer. It is
-right because fifteen rounds with one K slot and one DST slot leaves exactly two picks that must be
-spent on them; change either number and the sentence quietly stops being true while the constant
-stays. So the reserve is one round per late slot the league actually starts, counted back from the
-end, and round 14 falls out of it here rather than being asserted.
+The reserve is a whole number of rounds per late slot the league actually starts, counted back
+from the end — so the release round falls out of the league's own shape rather than being asserted,
+and a league with a different slot count or draft length gets a different, still-correct answer.
 
-`draft_plans` was checked before choosing that, because the ticket asked and because the plan table
-is the only thing in the repo that has simulated a draft. It has nothing to say: every plan it
-holds is a five-pick opening of QB, RB, WR and TE, and the simulation never takes a kicker at all.
+`draft_plans` was checked before choosing the multiplier, because the ticket asked and because the
+plan table is the only thing in the repo that has simulated a draft. It has nothing to say: every
+plan it holds is a five-pick opening of QB, RB, WR and TE, and the simulation never takes a kicker
+at all.
+
+## Why three rounds per slot, and why one number for all three positions
+
+The first version reserved exactly one round per late slot — enough, and no more, to spend one pick
+on each. That is the tightest cutoff that still guarantees room to fill them, but "just enough" is
+not the same question as "when would the drafter actually rather see them."
+
+Two other numbers were tried and rejected before this one, both worth recording because they looked
+right and were not:
+
+- **External market ADP**, real and already in the warehouse (`draft_board.consensus_adp`), says K
+  and DST release at very different rounds — DST's 10th percentile is round 10, K's is round 16 — and
+  P has no external ADP at all; nothing prices punters. Splitting the hold by position on that basis
+  looked well-founded and was checked against this league's own draft history and contradicted by
+  it: the wider market does not draft like this league does.
+- **This league's own points-over-replacement** says P is the stronger position of the three (median
+  POR −6.4, ahead of even DST at −9.5, with K a distant −10.5), which argued for releasing P before
+  K rather than after. Real behaviour disagreed with that too.
+
+What actually settled it is this league's own draft history — the one dataset that reflects how
+*this* room behaves rather than the market or the projection model — replayed across all four prior
+ESPN seasons (2022-2025), position-tagged through `draft_board`'s `espn_id` crosswalk: 100 real
+K/P/DST picks. They do not stagger by position at all; they cluster into one specialist run, and
+K, on average, goes *first* despite being the weakest of the three by value. Pooled across all three
+positions and all four seasons, 10% of those picks had happened by round 12, a quarter by round 13,
+half by round 15.
+
+So the reserve is one shared number derived from the league's shape — three rounds per late slot,
+which lands on this league's own round-12 mark — rather than a value tuned per position from either
+the market or the model. It still costs nothing to wait past it: the value curve behind `waiting.py`'s
+cost-of-waiting is unchanged, and typing a position name has always lifted the hold regardless of
+what the default reserve is.
 
 ## Which positions, and why the punter is one of them
 
@@ -69,6 +100,12 @@ import pandas as pd
 # so this is the candidate set rather than the answer.
 LATE_POSITIONS = ("K", "DST", "P")
 
+# Rounds of reserve per late slot the league starts — see "Why three rounds per slot" above. One
+# round is the minimum that still guarantees room to fill every late slot; this is sized to where
+# this league's own draft history (4 seasons of real K/P/DST picks) actually starts taking them,
+# not the minimum that happens to be safe.
+RESERVE_ROUNDS_PER_SLOT = 3
+
 
 def _round_of(overall_pick: int, team_count: int) -> int:
     """Which round an overall pick number falls in."""
@@ -101,7 +138,9 @@ def held_positions(picks: dict, league: dict, position: str | None = None) -> di
     if not late or position in late:
         return nothing
 
-    reserve = sum(int(league["slots"][late_position]) for late_position in late)
+    reserve = RESERVE_ROUNDS_PER_SLOT * sum(
+        int(league["slots"][late_position]) for late_position in late
+    )
     from_round = int(league["rounds"]) - reserve + 1
 
     next_pick = picks["next_pick"]
