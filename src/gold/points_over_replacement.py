@@ -33,6 +33,7 @@ import duckdb
 import pandas as pd
 
 from src import console
+from src.gold.league_scoring import STAT_COLUMNS, league_points
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -40,23 +41,6 @@ _SKILL_POSITIONS = ("QB", "RB", "WR", "TE")
 _FLEX_POSITIONS = ("RB", "WR", "TE")
 
 _SLOT_COLUMNS = {"QB": "qb_slots", "RB": "rb_slots", "WR": "wr_slots", "TE": "te_slots"}
-
-# weekly_stats raw counting stat -> the league_settings column with its per-unit point value.
-_STAT_COEFFICIENTS = {
-    "passing_yards": "pass_yd_pts",
-    "passing_tds": "pass_td_pts",
-    "passing_2pt_conversions": "pass_2pt_pts",
-    "passing_interceptions": "pass_int_pts",
-    "rushing_yards": "rush_yd_pts",
-    "rushing_tds": "rush_td_pts",
-    "rushing_2pt_conversions": "rush_2pt_pts",
-    "receptions": "rec_pts",
-    "receiving_yards": "rec_yd_pts",
-    "receiving_tds": "rec_td_pts",
-    "receiving_2pt_conversions": "rec_2pt_pts",
-}
-# Every league scores all three fumble-lost types (pass-sack/rush/rec) with one shared value.
-_FUMBLE_LOST_COLUMNS = ("sack_fumbles_lost", "rushing_fumbles_lost", "receiving_fumbles_lost")
 
 _OUTPUT_COLUMNS = [
     "league_key", "season", "player_id", "player_name", "position", "games_played",
@@ -66,9 +50,7 @@ _OUTPUT_COLUMNS = [
 
 
 def _season_totals(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    sum_columns = ", ".join(
-        f"SUM({c}) AS {c}" for c in (*_STAT_COEFFICIENTS, *_FUMBLE_LOST_COLUMNS)
-    )
+    sum_columns = ", ".join(f"SUM({c}) AS {c}" for c in STAT_COLUMNS)
     return con.sql(f"""
         SELECT
             player_id,
@@ -83,15 +65,6 @@ def _season_totals(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             AND position IN {_SKILL_POSITIONS}
         GROUP BY player_id, season
     """).df()
-
-
-def _league_points(season_totals: pd.DataFrame, league: pd.Series) -> pd.Series:
-    points = sum(
-        season_totals[stat] * league[coefficient]
-        for stat, coefficient in _STAT_COEFFICIENTS.items()
-    )
-    fumbles_lost = season_totals[list(_FUMBLE_LOST_COLUMNS)].sum(axis=1)
-    return points + fumbles_lost * league["fum_lost_pts"]
 
 
 def _replacement_levels(season_df: pd.DataFrame, league: pd.Series) -> pd.DataFrame:
@@ -170,7 +143,7 @@ def build_points_over_replacement() -> None:
     for _, league in leagues.iterrows():
         df = season_totals[["player_id", "player_name", "position", "season", "games_played"]].copy()
         df["league_key"] = league["league_key"]
-        df["league_points"] = _league_points(season_totals, league)
+        df["league_points"] = league_points(season_totals, league)
 
         frames.extend(_build_league_season(season_df, league) for _, season_df in df.groupby("season"))
 
