@@ -478,6 +478,20 @@ It resolves the seat from `ESPN_S2`/`SWID` in `.env` against the league configur
 `draftSettings.orderType` is `DRAFT_START`), so the tool refuses to resolve a seat — and refuses to
 run at all — until `draftDetail` says the room has actually opened.
 
+On Sunday or Monday night, check which fantasy matchups are still in question:
+
+```bash
+python -m src.gameday.storylines              # tonight's game, ranked closest margin first
+python -m src.gameday.storylines --week 3      # a specific week instead of the current one
+python -m src.gameday.storylines --day monday  # preview Monday night earlier in the day
+```
+
+It reads live matchup scores straight from Sleeper, works out which teams are playing tonight from
+the `schedules` table (the last kickoff of the day on Sunday, any game on Monday), and lists every
+matchup that still has a starter in that game — closest margin first, with each side's remaining
+players and this week's projection for them. A matchup where both lineups are already fully played
+out is decided and drops off the list. Read-only: nothing it does changes a score or a lineup.
+
 Query the warehouse with the DuckDB CLI or Python:
 
 ```bash
@@ -495,7 +509,8 @@ Run from the repo root, with `.venv` activated. Configuration is in `pytest.ini`
 
 Most of this repo is warehouse-to-warehouse SQL, verified by the row counts each module prints
 through `src/console.py`. Tests are for the modules whose logic is pure enough to check in
-isolation — currently the team normalizer and the live-draft work built on top of it.
+isolation — currently the team normalizer and the live-draft and gameday-storylines work built on
+top of it.
 
 The suite never opens the warehouse. `tests/conftest.py` makes any attempt to open a DuckDB file
 raise, for every test, without opting in. This is the same file-lock problem `src/query.py`
