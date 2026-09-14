@@ -32,15 +32,21 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
       alone.
   - `src/gold/<model>.py` — proprietary/derived models built on top of already-loaded silver
     tables (e.g. `consensus.py`). Pure SQL/Python over the warehouse — no fetch step, no network.
-  - `src/draft/` — the live draft assistant, and the one part of `src/` that is not a medallion
-    layer. It is neither: it reads no raw file and writes nothing at all. `src/draft/live.py` is
-    the runnable edge and the only module here that touches the world — GETs to Sleeper, the
+  - `src/draft/` — the live draft assistant, and one of two parts of `src/` that are not a
+    medallion layer. It is neither: it reads no raw file and writes nothing at all. `src/draft/live.py`
+    is the runnable edge and the only module here that touches the world — GETs to Sleeper, the
     warehouse read through `src/query.py`, which opens read-only and closes per call, and whatever
     the drafter has typed at stdin. Every other module is pure: already-built frames, a live API
     payload and a typed name in, frames and strings out.
     Everything about a player's value is fixed by the warehouse rebuild days beforehand; nothing
     here recomputes any of it. New modules for this feature go here rather than under `gold/`,
     which is documented as warehouse-to-warehouse and would be a lie about what these do.
+  - `src/gameday/` — the live in-season companion to `src/draft/`, same shape: it reads no raw
+    file and writes nothing. `src/gameday/storylines.py` is the runnable edge (GETs to Sleeper for
+    the live matchup scores, `src/query.py` reads of `schedules`, `sleeper_rosters`,
+    `sleeper_users`, `sleeper_players`, `sleeper_projections`); everything else is pure. New
+    modules for live, in-season, read-only tools go here rather than under `draft/` (which is
+    draft-day specifically) or `gold/` (warehouse-to-warehouse only).
 - `if __name__ == "__main__":` in each source module runs the full fetch→load sequence for that
   source end to end.
 - Console output goes through `src/console.py`, never a bare `print`:
