@@ -84,10 +84,13 @@ run src.gold.player_archetypes
 # Fifth tier — the draft-night tables. draft_board reprices consensus_projections in each league's
 # own scoring and slots for the season about to be played; draft_plan then reads that board to work
 # out who survives to each seat's picks and what opening plan is worth from there. weekly_projections
-# needs draft_board's sleeper_id map to resolve identity, so it runs right after.
+# needs draft_board's sleeper_id map to resolve identity, so it runs right after. ros_points needs
+# draft_board's projected_points_adjusted and sleeper_nfl_state's current week to net out points
+# already scored.
 run src.gold.draft_board
 run src.gold.draft_plan
 run src.gold.weekly_projections
+run src.gold.ros_points
 
 echo "── warehouse ─────────────────────────────────────────────"
 # Brief: every table was named as it was written. `python -m src.summary` lists them all.
