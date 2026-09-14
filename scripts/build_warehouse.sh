@@ -55,6 +55,9 @@ run src.gold.player_baselines
 run src.gold.depth_charts
 run src.gold.adp_consensus
 run src.gold.league_settings
+# free_agents needs only sleeper_players/sleeper_rosters/espn_player_ownership, all silver — it
+# has no gold dependency, but lives in gold as a derived view rather than a raw load.
+run src.gold.free_agents
 
 # Second tier — inhouse_projections needs every first-tier table except league_settings
 # (player_weighted_baselines, the two grade tables, player_depth_chart, and adp_consensus as its
