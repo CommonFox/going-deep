@@ -141,8 +141,30 @@ def load_adp_manual(raw_dir: Path = RAW_DIR) -> None:
     console.table("fantasypros_adp", len(df), f"from {len(frames)} files")
 
 
+def _current_week(con: duckdb.DuckDBPyConnection) -> int:
+    """The live NFL week, read from sleeper_nfl_state rather than a hand-typed constant.
+
+    `src.silver.sleeper`'s `load_nfl_state` loads that table before this module runs in
+    `scripts/build_warehouse.sh`. If it isn't there — a fresh clone, or a build that skipped that
+    step — this raises rather than defaulting to week 1, since fetching and archiving the wrong
+    week silently is worse than the build stopping.
+    """
+    try:
+        return con.execute("SELECT week FROM sleeper_nfl_state").fetchone()[0]
+    except duckdb.CatalogException as error:
+        raise RuntimeError(
+            "sleeper_nfl_state not found in the warehouse — run src.silver.sleeper "
+            "(load_nfl_state) before src.silver.fantasypros."
+        ) from error
+
+
 if __name__ == "__main__":
-    current_week = 1
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    try:
+        current_week = _current_week(con)
+    finally:
+        con.close()
+    console.note(f"fantasypros weekly rankings: current week is {current_week}")
 
     for scoring_format in DRAFT_SCORING_FORMATS:
         load_draft_rankings(fetch_draft_rankings(scoring_format), scoring_format)
