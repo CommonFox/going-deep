@@ -91,11 +91,13 @@ run src.gold.player_archetypes
 # out who survives to each seat's picks and what opening plan is worth from there. weekly_projections
 # needs draft_board's sleeper_id map to resolve identity, so it runs right after. ros_points needs
 # draft_board's projected_points_adjusted and sleeper_nfl_state's current week to net out points
-# already scored.
+# already scored. waiver_rankings joins free_agents onto weekly_projections/ros_points through
+# draft_board's identity crosswalk, so it needs all three to already exist.
 run src.gold.draft_board
 run src.gold.draft_plan
 run src.gold.weekly_projections
 run src.gold.ros_points
+run src.gold.waiver_rankings
 
 echo "── warehouse ─────────────────────────────────────────────"
 # Brief: every table was named as it was written. `python -m src.summary` lists them all.
