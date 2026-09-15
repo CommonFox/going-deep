@@ -8,7 +8,12 @@ checked by hand.
 
 import pandas as pd
 
-from src.gold.optimal_lineup import flag_close_calls, resolve_player_ids, split_by_projection
+from src.gold.optimal_lineup import (
+    bench_rows,
+    flag_close_calls,
+    resolve_player_ids,
+    split_by_projection,
+)
 
 
 def roster(*rows: dict) -> pd.DataFrame:
@@ -28,6 +33,10 @@ def roster_ids(*rows: dict) -> pd.DataFrame:
 
 def projections(*rows: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["player_id", "sleeper_points"])
+
+
+def missing(*rows: dict) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["player_name", "position"])
 
 
 # 1. A Sleeper roster row resolves to the warehouse-wide player_id through draft_board's sleeper_id
@@ -164,3 +173,42 @@ def test_empty_slot_is_never_a_close_call():
     row = rows.iloc[0]
     assert not row["is_close_call"]
     assert row["player_id"] is None
+
+
+# 13. A candidate fill_lineup started is never listed on the bench — the same `assignment` that
+#     seats him is what excludes him here.
+def test_started_candidate_is_not_on_the_bench():
+    rows = bench_rows(
+        [("rb1", "RB", 20.0)], {"RB1": "rb1"}, missing(), {"rb1": "A Back"},
+    )
+
+    assert rows.empty
+
+
+# 14. A candidate fill_lineup passed over shows up on the bench with his own projected points, so
+#     "by how much" is visible next to a starter at the same position.
+def test_unstarted_candidate_is_on_the_bench_with_his_points():
+    rows = bench_rows(
+        [("rb1", "RB", 20.0), ("rb2", "RB", 14.0)], {"RB1": "rb1"}, missing(),
+        {"rb1": "A Back", "rb2": "Backup Back"},
+    )
+
+    row = rows.iloc[0]
+    assert row["player_id"] == "rb2"
+    assert row["player_name"] == "Backup Back"
+    assert row["position"] == "RB"
+    assert row["projected_points"] == 14.0
+
+
+# 15. A roster player `split_by_projection` pulled out for missing a projection lands on the bench
+#     too, with a null `projected_points` rather than vanishing or reading as a real 0.
+def test_missing_projection_player_is_on_the_bench_with_null_points():
+    rows = bench_rows(
+        [], {}, missing({"player_name": "On Bye", "position": "RB"}), {},
+    )
+
+    row = rows.iloc[0]
+    assert row["player_id"] is None
+    assert row["player_name"] == "On Bye"
+    assert row["position"] == "RB"
+    assert pd.isna(row["projected_points"])

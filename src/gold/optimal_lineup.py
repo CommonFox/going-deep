@@ -3,6 +3,9 @@ starting lineup per (league, week) — issue #89, under the lineup-optimizer epi
 
 Pure warehouse-to-warehouse Python/SQL — no fetch step, no network. Built from `my_roster` (#88),
 `weekly_projections` (#80) and `league_settings`, with `fill_lineup` (#87) doing the actual seating.
+Writes two tables: `optimal_lineup` (one row per starting slot) and `optimal_lineup_bench` (one row
+per rostered player who didn't start that week, `projected_points` null when he had no projection
+to compare — the lineup-optimizer page's bench section, #90).
 
 ## Bridging two identity spaces
 
@@ -63,6 +66,10 @@ _CLOSE_CALL_MARGIN_POINTS = 3.0
 _OUTPUT_COLUMNS = [
     "league_key", "season", "week", "slot", "player_id", "player_name", "projected_points",
     "is_close_call", "bench_player_id", "bench_player_name", "bench_projected_points",
+]
+
+_BENCH_OUTPUT_COLUMNS = [
+    "league_key", "season", "week", "player_id", "player_name", "position", "projected_points",
 ]
 
 
@@ -155,13 +162,48 @@ def flag_close_calls(assignment: dict[str, str | None], players: list[Player]) -
     return pd.DataFrame(rows)
 
 
+def bench_rows(
+    candidates: list[Player], assignment: dict[str, str | None], missing: pd.DataFrame,
+    names: dict[str, str],
+) -> pd.DataFrame:
+    """Every rostered player who didn't start this week: a `candidates` entry `assignment` never
+    seated, plus the roster rows `split_by_projection` pulled out for missing a projection —
+    the lineup-optimizer page's "who didn't make it and by how much" section (#90), built from the
+    same inputs `_week_rows` already has rather than re-deriving them from the warehouse.
+
+    A benched candidate carries his own `projected_points`, same units and scoring basis as the
+    starters he lost out to. A missing-projection player carries a null `projected_points` instead
+    of a fabricated 0 — the same distinction `split_by_projection`'s docstring makes about the
+    starting lineup, extended to the bench so the page can render "no projection" rather than
+    silently ranking him last.
+    """
+    started = {player_id for player_id in assignment.values() if player_id}
+    bench = [
+        {
+            "player_id": player_id, "player_name": names.get(player_id), "position": position,
+            "projected_points": points,
+        }
+        for player_id, position, points in candidates
+        if player_id not in started
+    ]
+    unresolved = [
+        {
+            "player_id": None, "player_name": row.player_name, "position": row.position,
+            "projected_points": None,
+        }
+        for row in missing.itertuples()
+    ]
+    columns = ["player_id", "player_name", "position", "projected_points"]
+    return pd.DataFrame(bench + unresolved, columns=columns)
+
+
 def _week_rows(
     league_key: str, season: int, week: int,
     league_roster: pd.DataFrame, week_projections: pd.DataFrame,
     slots: dict[str, int], flex: int, superflex: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """One league's one week: the filled lineup with close-call flags and player names, and the
-    roster rows that had nothing to seat them on."""
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """One league's one week: the filled lineup with close-call flags and player names, the roster
+    rows that had nothing to seat them on, and the full bench (#90's page reads this third one)."""
     candidates, missing = split_by_projection(league_roster, week_projections)
     assignment, _ = fill_lineup(candidates, slots, flex, superflex)
     rows = flag_close_calls(assignment, candidates)
@@ -173,7 +215,10 @@ def _week_rows(
     rows["season"] = season
     rows["week"] = week
 
-    return rows, missing.assign(league_key=league_key, season=season, week=week)
+    bench = bench_rows(candidates, assignment, missing, names)
+    bench = bench.assign(league_key=league_key, season=season, week=week)
+
+    return rows, missing.assign(league_key=league_key, season=season, week=week), bench
 
 
 def build_optimal_lineup() -> None:
@@ -188,6 +233,7 @@ def build_optimal_lineup() -> None:
 
     lineup_frames = []
     missing_frames = []
+    bench_frames = []
     for _, league in league_settings.iterrows():
         league_key = league["league_key"]
         scoring = _scoring_basis(league)
@@ -202,7 +248,7 @@ def build_optimal_lineup() -> None:
         ]
 
         for week in sorted(league_projections["week"].unique()):
-            rows, missing = _week_rows(
+            rows, missing, bench = _week_rows(
                 league_key, season, week, league_roster,
                 league_projections[league_projections["week"] == week],
                 slots, flex, superflex,
@@ -210,8 +256,11 @@ def build_optimal_lineup() -> None:
             lineup_frames.append(rows)
             if not missing.empty:
                 missing_frames.append(missing)
+            if not bench.empty:
+                bench_frames.append(bench)
 
     lineup = pd.concat(lineup_frames, ignore_index=True)[_OUTPUT_COLUMNS]
+    bench = pd.concat(bench_frames, ignore_index=True)[_BENCH_OUTPUT_COLUMNS]
 
     if missing_frames:
         missing = pd.concat(missing_frames, ignore_index=True)
@@ -223,9 +272,11 @@ def build_optimal_lineup() -> None:
 
     con = duckdb.connect(str(WAREHOUSE_PATH))
     con.execute("CREATE OR REPLACE TABLE optimal_lineup AS SELECT * FROM lineup")
+    con.execute("CREATE OR REPLACE TABLE optimal_lineup_bench AS SELECT * FROM bench")
     con.close()
 
     console.table("optimal_lineup", len(lineup))
+    console.table("optimal_lineup_bench", len(bench))
 
 
 if __name__ == "__main__":
