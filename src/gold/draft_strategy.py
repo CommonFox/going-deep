@@ -107,7 +107,8 @@ import pandas as pd
 from scipy import stats
 
 from src import console
-from src.gold.points_over_replacement import _FLEX_POSITIONS, _SKILL_POSITIONS
+from src.gold.lineup_fill import fill_lineup
+from src.gold.points_over_replacement import _SKILL_POSITIONS
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -115,8 +116,6 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 # loop runs tens of millions of times and indexing a small array beats hashing a string.
 _POSITIONS = list(_SKILL_POSITIONS)
 _POSITION_CODE = {pos: code for code, pos in enumerate(_POSITIONS)}
-_FLEX_CODES = tuple(_POSITION_CODE[pos] for pos in _FLEX_POSITIONS)
-_QB = _POSITION_CODE["QB"]
 
 # The window a "draft strategy" is actually a claim about. The full-house pitch is a claim about
 # rounds 1-5; past that everyone is taking the best player left regardless of what they planned.
@@ -281,25 +280,18 @@ def _orderings() -> list[tuple[str, tuple[int, ...]]]:
 def _score_lineup(counts_pts: list[list[float]], lineup: dict) -> float:
     """Hindsight-optimal starting lineup total from one team's drafted roster.
 
-    FLEX takes RB/WR/TE only; the superflex slot additionally accepts a quarterback. Filling the
-    restrictive slot first and the permissive one from what's left is optimal here precisely because
-    superflex eligibility is a superset of flex eligibility.
+    Delegates to the shared greedy fill in `lineup_fill.py` (issue #87) — the proof that filling
+    narrowest eligibility first is optimal (dedicated slot, then FLEX, then superflex) lives there
+    now, since it no longer depends on whether what's being filled is a point total or a named
+    player. `counts_pts` carries no player identity, so each entry gets a synthetic id unique
+    within this one roster, used only to break ties deterministically.
     """
-    slots = lineup["slots"]
-    total = 0.0
-    for code, pos in enumerate(_POSITIONS):
-        counts_pts[code].sort(reverse=True)
-        total += sum(counts_pts[code][: slots[pos]])
-
-    flex_pool = sorted(
-        (points for code in _FLEX_CODES for points in counts_pts[code][slots[_POSITIONS[code]]:]),
-        reverse=True,
-    )
-    total += sum(flex_pool[: lineup["flex"]])
-    if lineup["superflex"]:
-        leftover = flex_pool[lineup["flex"]:] + counts_pts[_QB][slots["QB"]:]
-        leftover.sort(reverse=True)
-        total += sum(leftover[: lineup["superflex"]])
+    players = [
+        (f"{pos}{i}", pos, points)
+        for pos, points_at_pos in zip(_POSITIONS, counts_pts)
+        for i, points in enumerate(points_at_pos)
+    ]
+    _, total = fill_lineup(players, lineup["slots"], lineup["flex"], lineup["superflex"])
     return total
 
 
