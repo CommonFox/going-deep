@@ -32,14 +32,21 @@ than the tool would have been useful. Both statuses are kept now, with `availabi
 is which, so a hot `WAIVERS` name is visible today even though claiming him still costs priority
 rather than being a same-day add.
 
-## `availability`, and why Sleeper's is a constant
+## `availability`: ESPN reads it, Sleeper's is derived
 
-`FREEAGENT` maps to `'free_agent'`, `WAIVERS` to `'on_waivers'`. Sleeper's arm has no ownership
-flag to read this distinction from at all (see above — a Sleeper free agent is derived by set
-difference, not a status field), and nothing else already loaded in this warehouse reconstructs a
-live "still in his post-drop holding period" flag for Sleeper without a new fetch this table isn't
-scoped to add. So every Sleeper row carries `'free_agent'` — not a claim that Sleeper has no
-waiver-period concept, only that this table can't currently see it.
+`FREEAGENT` maps to `'free_agent'`, `WAIVERS` to `'on_waivers'` — ESPN's own system already tracks
+this and hands it back as a flag, no derivation needed.
+
+Sleeper runs the same real mechanic (any player, rostered or not, is locked to whoever holds him
+once his game starts, and free agents specifically stay locked out of same-day pickup until the
+league's Wednesday waiver run) but exposes no flag for it anywhere this warehouse reads — a Sleeper
+free agent is a set difference (see above), not a status field. So it's derived here instead: a
+Sleeper free agent is `'on_waivers'` if his team's game for the *current* week (`sleeper_nfl_state`)
+already has a final score in `schedules`, `'free_agent'` otherwise. `schedules` disagrees with
+Sleeper on how to spell some teams (`"LA"` vs. Sleeper's `"LAR"`, the same mismatch `draft_board.py`
+already normalizes for), so both sides go through `normalize_team` before the two are compared. A
+free agent with no current team (`sleeper_players.team` null) can't be matched to a game either way
+and stays `'free_agent'` — there's no schedule row to say otherwise.
 
 `player.defaultPositionId` is resolved through `espn.POSITION_IDS`, the same numeric map
 `espn.py`'s own `load_projections` already uses, rather than re-deriving it here.
@@ -51,12 +58,29 @@ import duckdb
 
 from src import console
 from src.silver.espn import POSITION_IDS
+from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 _BUILD_SQL = """
 CREATE OR REPLACE TABLE free_agents AS
-WITH sleeper_rostered AS (
+WITH current_week AS (
+    SELECT CAST(season AS BIGINT) AS season, week FROM sleeper_nfl_state
+),
+played_teams AS (
+    SELECT normalize_team(s.home_team) AS team
+    FROM schedules s, current_week
+    WHERE s.season = current_week.season AND s.week = current_week.week
+        AND s.game_type = 'REG' AND s.home_score IS NOT NULL
+
+    UNION
+
+    SELECT normalize_team(s.away_team) AS team
+    FROM schedules s, current_week
+    WHERE s.season = current_week.season AND s.week = current_week.week
+        AND s.game_type = 'REG' AND s.away_score IS NOT NULL
+),
+sleeper_rostered AS (
     SELECT DISTINCT UNNEST(players) AS player_id FROM sleeper_rosters
 ),
 sleeper_free_agents AS (
@@ -65,9 +89,10 @@ sleeper_free_agents AS (
         sp.player_id AS platform_player_id,
         COALESCE(sp.full_name, sp.player_id) AS player_name,
         sp.position,
-        'free_agent' AS availability
+        CASE WHEN pt.team IS NOT NULL THEN 'on_waivers' ELSE 'free_agent' END AS availability
     FROM sleeper_players sp
     LEFT JOIN sleeper_rostered sr ON sr.player_id = sp.player_id
+    LEFT JOIN played_teams pt ON pt.team = normalize_team(sp.team)
     WHERE sr.player_id IS NULL
 ),
 espn_free_agents AS (
@@ -93,6 +118,7 @@ def _espn_position(position_id: int | None) -> str | None:
 def build_free_agents() -> None:
     con = duckdb.connect(str(WAREHOUSE_PATH))
     con.create_function("espn_position", _espn_position, ["BIGINT"], "VARCHAR")
+    con.create_function("normalize_team", normalize_team, ["VARCHAR"], "VARCHAR")
 
     con.execute(_BUILD_SQL)
     (count,) = con.execute("SELECT COUNT(*) FROM free_agents").fetchone()
