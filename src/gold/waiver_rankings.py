@@ -39,10 +39,44 @@ ride along unrenamed as the corroborating signal `weekly_projections` already ke
 its points number, for the same reason: a rank and a points figure are not the same unit and were
 never meant to be blended into one.
 
+## The ESPN fallback, and why it exists
+
+#104: every ESPN free agent showed "No projection" for the current week, 354 of 354 — not a join
+bug, but Sleeper's own weekly model genuinely not bothering with ESPN's free-agent pool, which
+(10 teams, `espn_player_ownership`'s narrower player universe) skews to backups deep enough that
+none of them clear Sleeper's projection bar; Sleeper's own free-agent pool skips the same kind of
+player, just at a much lower rate because it is drawn from a bigger, shallower 14-team league.
+
+ESPN's own per-week projection (`espn_weekly_projections`, #104 — see `espn.load_weekly_projections`
+for where it comes from) covers some of that gap: about 14% of ESPN's free-agent pool has one where
+Sleeper has nothing. `weekly_points` falls back to it only when `weekly_projections.sleeper_points`
+is null, and only for `league_key = 'espn'` — Sleeper's own number is left alone whenever it exists,
+since Sleeper's is the primary signal everywhere else in this warehouse and ESPN's weekly number is
+computed under ESPN's own league scoring, not the shared `ppr`/`half_ppr` axis `weekly_projections`
+carries. `weekly_points_source` says which one a row actually got its number from (`'sleeper'`,
+`'espn'`, or null for neither), so a blended column never hides which source is actually behind a
+given figure — the same reason `draft_board.availability_source` exists.
+
+The fallback joins on `free_agents.platform_player_id` directly, not through `draft_board`'s
+crosswalk, so it can also reach the free agents `draft_board` never resolved a `player_id` for (see
+above) — ESPN's own ID is exactly the ID `espn_weekly_projections` is keyed on, so no identity
+resolution has to succeed first for this one column.
+
 Filtered to the current week and each league's own scoring basis (`sleeper_nfl_state.week`,
 `draft_board.scoring` for that `league_key`) — the same week `weekly_projections` carries its
 FantasyPros columns for, and the pairing `draft_board`/`weekly_projections` already use so this
 table can't drift onto a different scoring basis than either of them.
+
+## `availability`: a free agent isn't always a same-day add
+
+`free_agents.availability` (`'free_agent'` / `'on_waivers'`, #104) rides through unchanged. It
+matters most for exactly the player a drafter is most likely to be checking this board for: someone
+dropped right after a big week is `'on_waivers'`, not `'free_agent'`, in ESPN leagues — and this
+table used to only carry `free_agents` rows ESPN called an outright `FREEAGENT`, which meant the
+single most-checked kind of name was invisible here until the waiver period cleared, sometimes a
+day or more after the board would have actually been useful for him. Both are kept now so that gap
+doesn't reopen; `availability` is what tells the reader a `'on_waivers'` row still costs waiver
+priority to claim rather than being a same-day pickup.
 
 ## Replacement level: a (league, position) constant, not a per-player lookup
 
@@ -71,8 +105,8 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 _SKILL_POSITIONS = ("QB", "RB", "WR", "TE")
 
 _OUTPUT_COLUMNS = [
-    "league_key", "season", "week", "player_id", "player_name", "position",
-    "weekly_points", "fantasypros_rank_ecr", "fantasypros_pos_rank",
+    "league_key", "season", "week", "player_id", "player_name", "position", "availability",
+    "weekly_points", "weekly_points_source", "fantasypros_rank_ecr", "fantasypros_pos_rank",
     "ros_points", "replacement_level_points", "starters_at_position",
 ]
 
@@ -94,7 +128,7 @@ espn_identity AS (
 ),
 available AS (
     SELECT
-        fa.league_key, fa.position,
+        fa.league_key, fa.position, fa.platform_player_id, fa.availability,
         fa.player_name AS free_agent_name,
         COALESCE(si.player_id, ei.player_id) AS player_id
     FROM free_agents fa
@@ -116,7 +150,12 @@ SELECT
     available.player_id,
     available.free_agent_name AS player_name,
     available.position,
-    wp.sleeper_points AS weekly_points,
+    available.availability,
+    COALESCE(wp.sleeper_points, ewp.projected_points) AS weekly_points,
+    CASE
+        WHEN wp.sleeper_points IS NOT NULL THEN 'sleeper'
+        WHEN ewp.projected_points IS NOT NULL THEN 'espn'
+    END AS weekly_points_source,
     wp.fantasypros_rank_ecr,
     wp.fantasypros_pos_rank,
     ros.ros_points,
@@ -130,6 +169,11 @@ LEFT JOIN weekly_projections wp
     AND wp.season = current_week.season
     AND wp.week = current_week.week
     AND wp.scoring = league_scoring_basis.scoring
+LEFT JOIN espn_weekly_projections ewp
+    ON available.league_key = 'espn'
+    AND CAST(ewp.espn_id AS VARCHAR) = available.platform_player_id
+    AND ewp.season = current_week.season
+    AND ewp.week = current_week.week
 LEFT JOIN ros_points ros
     ON ros.league_key = available.league_key AND ros.player_id = available.player_id
 LEFT JOIN replacement_levels rl

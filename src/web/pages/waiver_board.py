@@ -13,6 +13,14 @@ Weekly and rest-of-season points are surfaced as two independently-sortable colu
 one blended score, matching #85's own reasoning: a bye-week fill-in and a real role change can
 rank oppositely on the two, and picking one for the user would hide exactly the disagreement this
 page exists to show.
+
+## On-waivers players (#104)
+
+`waiver_rankings.availability` can be `'on_waivers'` as well as `'free_agent'` — a player just
+dropped and sitting in his league's waiver claim period, not a same-day add. Shown by default
+(that name is very often exactly who someone opened this page to check) with a badge saying he
+still costs waiver priority rather than an instant pickup, and filterable off for whoever only
+wants outright-addable names.
 """
 
 import pandas as pd
@@ -24,8 +32,13 @@ _LEAGUE_LABELS = {"sleeper": "Sleeper", "espn": "ESPN"}
 _POSITIONS = ["QB", "RB", "WR", "TE"]
 
 
-def _points_label(points: float) -> str:
-    return "No projection" if pd.isna(points) else f"{points:.2f} pts"
+def _points_label(points: float, source: str | None = None) -> str:
+    if pd.isna(points):
+        return "No projection"
+    # Sleeper is the primary source everywhere else on this page, so it's the unmarked case;
+    # only the ESPN fallback (#104) needs to say where its number actually came from.
+    tag = " (ESPN proj)" if source == "espn" else ""
+    return f"{points:.2f} pts{tag}"
 
 
 st.title("Waiver Board")
@@ -42,16 +55,19 @@ league_row = leagues.loc[leagues["league_key"] == league_key].iloc[0]
 season, week = int(league_row["season"]), int(league_row["week"])
 st.caption(f"Week {week} · {season} season")
 
-col1, col2 = st.columns([2, 1])
+col1, col2, col3 = st.columns([2, 1, 1])
 positions = col1.multiselect("Position", _POSITIONS, default=_POSITIONS)
 sort_by = col2.radio("Sort by", ["This week", "Rest of season"], horizontal=True)
 sort_column = "weekly_points" if sort_by == "This week" else "ros_points"
+include_on_waivers = col3.checkbox("Include on-waivers", value=True)
 
 board = q(
     "SELECT * FROM waiver_rankings WHERE league_key = ? AND season = ? AND week = ?",
     [league_key, season, week],
 )
 board = board[board["position"].isin(positions)]
+if not include_on_waivers:
+    board = board[board["availability"] != "on_waivers"]
 
 if board.empty:
     st.info("No available players match this filter.")
@@ -62,9 +78,12 @@ ranked = board.sort_values(sort_column, ascending=False, na_position="last")
 for row in ranked.itertuples():
     with st.container(border=True):
         cols = st.columns([3, 1, 2, 2, 3])
-        cols[0].markdown(f"**{row.player_name}**")
+        name = f"**{row.player_name}**"
+        if row.availability == "on_waivers":
+            name += " :orange[on waivers]"
+        cols[0].markdown(name)
         cols[1].write(row.position)
-        cols[2].write(f"Week: {_points_label(row.weekly_points)}")
+        cols[2].write(f"Week: {_points_label(row.weekly_points, row.weekly_points_source)}")
         cols[3].write(f"ROS: {_points_label(row.ros_points)}")
 
         if pd.isna(row.replacement_level_points):
