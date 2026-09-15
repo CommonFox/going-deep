@@ -330,9 +330,24 @@ def _hold(hold: dict | None) -> str | None:
     )
 
 
+def _must_fill(fill: dict | None) -> str | None:
+    """Why the board has narrowed to only what can still start, when it has.
+
+    Unlike a hold, there is no round this lifts and no escape hatch to name — the endgame does not
+    come back, and typing a position does not make a slot exist. The note says only what is true:
+    which positions still have a hole, and that nothing else is being shown because of it.
+    """
+    if fill is None or not fill["active"]:
+        return None
+    positions = _listed(sorted(fill["positions"]), "and")
+    return (
+        f"  must fill {positions} — too few picks left to spend one on anything else"
+    )
+
+
 def _candidates(
     candidates: pd.DataFrame, picks: dict, limit: int, degraded: bool, covers_to: int | None,
-    position: str | None = None, hold: dict | None = None,
+    position: str | None = None, hold: dict | None = None, fill: dict | None = None,
 ) -> list[str]:
     """The board that is left, most expensive to pass on first, cut to what fits on a screen.
 
@@ -344,12 +359,14 @@ def _candidates(
     rule, note = _ranking(picks, degraded, covers_to)
     scope = f" ({position} only)" if position else ""
     withheld = _hold(hold)
+    must_fill = _must_fill(fill)
     lines = [
         "",
         f"Best available{scope} — {len(shown)} of {len(candidates)}{rule}",
         note,
         *([withheld] if withheld else []),
-        f"  {'#':>3}  {'POS':<5}{'PLAYER':<{_NAME_WIDTH}}{'TM':<5}{'BYE':>3}{'PoR':>9}"
+        *([must_fill] if must_fill else []),
+        f"  {'#':>3}  {'POS':<5}{'PLAYER':<{_NAME_WIDTH}}{'TM':<5}{'BYE':>3}{'PoR':>9}{'MINE':>9}"
         f"{'SURV':>7}{'COST':>9}",
     ]
     if shown.empty:
@@ -363,7 +380,7 @@ def _candidates(
         lines.append(
             f"  {rank:>3}  {_text(row.position):<5}{_text(row.player_name):<{_NAME_WIDTH}}"
             f"{_text(row.team):<5}{_bye(row.bye_week):>3}"
-            f"{row.points_over_replacement:>9.1f}"
+            f"{row.points_over_replacement:>9.1f}{row.roster_value:>9.1f}"
             f"{_percent(row.p_survives):>7}{_cost(row.cost_of_waiting):>9}"
         )
     return lines
@@ -381,15 +398,18 @@ def render_board(
     position: str | None = None,
     cliffs: pd.DataFrame | None = None,
     hold: dict | None = None,
+    fill: dict | None = None,
     id_key: str = "sleeper_id",
     platform_label: str = "Sleeper",
 ) -> str:
     """The whole screen as one string.
 
-    `candidates` is what `rank_by_cost_of_waiting` returned with the board's `bye_week` joined on,
-    `picks` is what `ingest_picks` returned, and `league` is the shape `resolve_seat` read out
-    of the draft record. `limit` is how much of the board to show; the count above the table
-    always names the total, so a cut list never reads as a short one.
+    `candidates` is what `rank_by_cost_of_waiting` returned with the board's `bye_week` joined on
+    and `roster.marginal_value` joined on as `roster_value` — see `roster.py` for what it means
+    and why the list is ordered by it rather than by `points_over_replacement`. `picks` is what
+    `ingest_picks` returned, and `league` is the shape `resolve_seat` read out of the draft record.
+    `limit` is how much of the board to show; the count above the table always names the total, so
+    a cut list never reads as a short one.
 
     `degraded` and `covers_to` are the rest of what the ranking returned. They are separate
     arguments rather than a dict because they change the words above the table and nothing else,
@@ -417,6 +437,11 @@ def render_board(
     it names are already gone from both `candidates` and `cliffs`; this is what puts the reason on
     screen, so that a board with no kickers on it reads as a decision rather than as a loss.
 
+    `fill` is what `roster.must_fill` returned, or None for a screen with no endgame restriction.
+    Like `hold` it has already been subtracted from both `candidates` and `cliffs` by the caller;
+    this is what says why, so a board narrowed to two positions in the last rounds reads as the
+    roster's own arithmetic rather than a board that has run out of players.
+
     `id_key`/`platform_label` name whichever platform ID an unmatched pick carries — see
     `_unmatched`. Defaulted for Sleeper; `live_espn.py` passes `"espn_id"`/`"ESPN"`.
     """
@@ -427,5 +452,5 @@ def render_board(
     lines += _roster(picks["roster"], league)
     lines += _guidance(guidance)
     lines += _cliffs(cliffs, league)
-    lines += _candidates(candidates, picks, limit, degraded, covers_to, position, hold)
+    lines += _candidates(candidates, picks, limit, degraded, covers_to, position, hold, fill)
     return "\n".join(lines)

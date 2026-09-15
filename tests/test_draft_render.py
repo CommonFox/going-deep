@@ -16,6 +16,7 @@ import pandas as pd
 
 from src.draft.picks import ingest_picks
 from src.draft.render import render_board
+from src.draft.roster import marginal_value
 from src.draft.waiting import rank_by_cost_of_waiting
 
 SLOTS = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPER_FLEX": 1, "K": 1, "DST": 1}
@@ -36,6 +37,9 @@ def candidates(*rows: dict) -> pd.DataFrame:
         "p_survives": 0.35,
         "cost_of_waiting": 42.0,
         "survival_known": True,
+        # Roster value (issue #77), defaulted equal to points_over_replacement — an open slot, no
+        # displacement — so every case above still describes the raw value it was written about.
+        "roster_value": 100.0,
         "bye_week": 9,
     }
     frame = pd.DataFrame(
@@ -239,6 +243,7 @@ def test_the_three_halves_join_on_a_real_payload():
     ranked = rank_by_cost_of_waiting(board, survival, result)["candidates"].merge(
         board[["player_id", "bye_week"]], on="player_id", how="left"
     )
+    ranked["roster_value"] = marginal_value(ranked, result, LEAGUE, board)
 
     out = render_board(ranked, result, LEAGUE)
     assert "A Receiver" in out
@@ -708,3 +713,44 @@ def test_the_hold_note_sits_with_the_candidate_list_rather_than_above_the_roster
     )
 
     assert out.index("Best available") < out.index("holding")
+
+
+# Issue #77: a candidate's value to this specific roster, beside the board's own raw price rather
+# than instead of it — a ranking is auditable or it is obeyed, and a demoted quarterback with
+# nothing on the row to explain it would just look broken.
+
+
+# 46. The adjusted value has its own column, separate from the board's own PoR, so a demoted
+# player's row still shows both numbers a drafter needs to see why he moved.
+def test_a_candidate_shows_his_roster_adjusted_value_beside_his_raw_por():
+    out = render_board(
+        candidates({"player_name": "Malik Willis", "points_over_replacement": 44.9,
+                    "roster_value": 0.0}),
+        ingested(), LEAGUE,
+    )
+    row = line_naming(out, "Malik Willis")
+    assert "44.9" in row
+    assert "0.0" in row
+
+
+def fill(positions: set, active: bool = True) -> dict:
+    """What `roster.must_fill` returned, as the renderer takes it."""
+    return {"active": active, "positions": positions}
+
+
+# 47. The note names exactly what still needs a home, so a board narrowed to two positions in the
+# last rounds reads as arithmetic rather than as a board that has run out of players.
+def test_the_screen_names_what_must_still_be_filled():
+    out = render_board(candidates(), ingested(), LEAGUE, fill=fill({"K", "DST"}))
+    note = line_naming(out, "must fill")
+
+    assert "K" in note and "DST" in note
+
+
+# 48. An inactive result says nothing about it — a note that never lifts would be read every tick
+# whether or not it still applies.
+def test_a_screen_with_nothing_to_fill_says_nothing_about_it():
+    assert "must fill" not in render_board(candidates(), ingested(), LEAGUE)
+    assert "must fill" not in render_board(
+        candidates(), ingested(), LEAGUE, fill=fill(set(), active=False)
+    )
