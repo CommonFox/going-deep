@@ -92,12 +92,14 @@ run src.gold.player_archetypes
 # needs draft_board's sleeper_id map to resolve identity, so it runs right after. ros_points needs
 # draft_board's projected_points_adjusted and sleeper_nfl_state's current week to net out points
 # already scored. waiver_rankings joins free_agents onto weekly_projections/ros_points through
-# draft_board's identity crosswalk, so it needs all three to already exist.
+# draft_board's identity crosswalk; optimal_lineup needs my_roster, weekly_projections and that same
+# crosswalk, so it runs after both exist.
 run src.gold.draft_board
 run src.gold.draft_plan
 run src.gold.weekly_projections
 run src.gold.ros_points
 run src.gold.waiver_rankings
+run src.gold.optimal_lineup
 
 echo "── warehouse ─────────────────────────────────────────────"
 # Brief: every table was named as it was written. `python -m src.summary` lists them all.
