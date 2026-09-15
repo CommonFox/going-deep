@@ -197,6 +197,51 @@ def load_projections(raw_path: Path, season: int) -> None:
     console.table("espn_projections", len(df))
 
 
+def load_weekly_projections(raw_path: Path, season: int) -> None:
+    """Parse ESPN's own per-week point projection out of the player pool raw file.
+
+    Same raw file as `load_projections` (no new network call), but keyed on `scoringPeriodId`
+    instead of pinned to `0`: ESPN's `kona_player_info` view carries the season-total projection
+    (`scoringPeriodId=0`) and, alongside it, one weekly projection row per player for the current
+    NFL week — the same week `fantasypros_weekly_rankings_*` and `sleeper_projections`' populated
+    rows track, and likewise never a weekly archive: this table holds whatever week the raw file
+    was fetched for, overwritten on every build.
+
+    Exists for `waiver_rankings` (#104) to fall back onto when Sleeper's own weekly projection is
+    null for an ESPN free agent — see that module's docstring for why Sleeper's number is missing
+    for so much of ESPN's pool in the first place, and why a second source is worth keeping
+    distinct rather than blended into `sleeper_points`.
+    """
+    players = json.loads(raw_path.read_text())
+
+    rows = []
+    for row in players:
+        player = row.get("player", {})
+        for stat in player.get("stats", []):
+            if (
+                stat.get("statSourceId") == 1
+                and stat.get("scoringPeriodId")
+                and stat.get("seasonId") == season
+            ):
+                rows.append(
+                    {
+                        "espn_id": player.get("id"),
+                        "position": POSITION_IDS.get(player.get("defaultPositionId")),
+                        "season": season,
+                        "week": stat.get("scoringPeriodId"),
+                        "projected_points": stat.get("appliedTotal"),
+                    }
+                )
+
+    df = pd.DataFrame(rows)
+    WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.execute("CREATE OR REPLACE TABLE espn_weekly_projections AS SELECT * FROM df")
+    con.close()
+
+    console.table("espn_weekly_projections", len(df))
+
+
 def fetch_transactions(league_id: str, season: int) -> Path:
     """Fetch waiver claims, trades, and adds/drops and save raw to JSON."""
     data = _get(_league_url(league_id, season), params={"view": "mTransactions2"})
@@ -226,5 +271,6 @@ if __name__ == "__main__":
     ownership_raw_path = fetch_player_ownership(LEAGUE_ID, SEASON)
     load_player_ownership(ownership_raw_path)
     load_projections(ownership_raw_path, SEASON)
+    load_weekly_projections(ownership_raw_path, SEASON)
     load_transactions(fetch_transactions(LEAGUE_ID, SEASON))
     load_boxscores(fetch_boxscores(LEAGUE_ID, SEASON))

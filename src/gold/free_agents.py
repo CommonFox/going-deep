@@ -16,14 +16,30 @@ league (not just one team's). Team defenses carry no `full_name` in `sleeper_pla
 `player_id`/`team` equal to the team's own abbreviation (e.g. `"HOU"`) — so the name falls back to
 that abbreviation rather than going out null.
 
-## ESPN: a direct flag, but only one of its two "not on a team" values
+## ESPN: a direct flag, with both of its "not on a team" values kept and told apart
 
 `espn_player_ownership.status` is `FREEAGENT` for an outright free agent, `ONTEAM` for a rostered
 player, and `WAIVERS` for a player who was just dropped and is sitting in that league's waiver
 claim period — not on a roster, but not addable outright either; claiming him spends waiver
-priority rather than a plain pickup. Only `FREEAGENT` counts as available here, matching the
-ticket this table was written against: `onTeamId` is `0` for both `FREEAGENT` and `WAIVERS` rows,
-so `status` (not `onTeamId`) is the column that actually distinguishes them.
+priority rather than a plain pickup. `onTeamId` is `0` for both `FREEAGENT` and `WAIVERS` rows, so
+`status` (not `onTeamId`) is the column that actually distinguishes them.
+
+This table originally dropped `WAIVERS` rows entirely, on the reasoning that they weren't
+addable outright. #104 found the real cost of that: a player dropped right after a big week — the
+single most likely reason anyone checks the waiver board on a given day — sits in exactly that
+state, and was invisible here until his league's waiver period cleared, often a day or more later
+than the tool would have been useful. Both statuses are kept now, with `availability` saying which
+is which, so a hot `WAIVERS` name is visible today even though claiming him still costs priority
+rather than being a same-day add.
+
+## `availability`, and why Sleeper's is a constant
+
+`FREEAGENT` maps to `'free_agent'`, `WAIVERS` to `'on_waivers'`. Sleeper's arm has no ownership
+flag to read this distinction from at all (see above — a Sleeper free agent is derived by set
+difference, not a status field), and nothing else already loaded in this warehouse reconstructs a
+live "still in his post-drop holding period" flag for Sleeper without a new fetch this table isn't
+scoped to add. So every Sleeper row carries `'free_agent'` — not a claim that Sleeper has no
+waiver-period concept, only that this table can't currently see it.
 
 `player.defaultPositionId` is resolved through `espn.POSITION_IDS`, the same numeric map
 `espn.py`'s own `load_projections` already uses, rather than re-deriving it here.
@@ -48,7 +64,8 @@ sleeper_free_agents AS (
         'sleeper' AS league_key,
         sp.player_id AS platform_player_id,
         COALESCE(sp.full_name, sp.player_id) AS player_name,
-        sp.position
+        sp.position,
+        'free_agent' AS availability
     FROM sleeper_players sp
     LEFT JOIN sleeper_rostered sr ON sr.player_id = sp.player_id
     WHERE sr.player_id IS NULL
@@ -58,9 +75,10 @@ espn_free_agents AS (
         'espn' AS league_key,
         CAST(o.id AS VARCHAR) AS platform_player_id,
         o."player.fullName" AS player_name,
-        espn_position(o."player.defaultPositionId") AS position
+        espn_position(o."player.defaultPositionId") AS position,
+        CASE WHEN o.status = 'WAIVERS' THEN 'on_waivers' ELSE 'free_agent' END AS availability
     FROM espn_player_ownership o
-    WHERE o.status = 'FREEAGENT'
+    WHERE o.status IN ('FREEAGENT', 'WAIVERS')
 )
 SELECT * FROM sleeper_free_agents
 UNION ALL
