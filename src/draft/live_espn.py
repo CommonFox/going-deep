@@ -63,6 +63,7 @@ from src.draft.live import (
 from src.draft.marks import combine, read_mark
 from src.draft.refresh import fingerprint, status_line
 from src.draft.render import render_board
+from src.draft.roster import marginal_value, must_fill, restrict
 from src.draft.waiting import rank_by_cost_of_waiting
 from src.silver.espn import ESPN_S2, LEAGUE_ID, SEASON, SWID
 
@@ -157,15 +158,23 @@ def screen(
     candidates = ranked["candidates"].merge(
         context["board"][["player_id", "bye_week"]], on="player_id", how="left"
     )
+    # A candidate's value to this roster, not to a freely available one — see roster.py and
+    # live.py's screen(), which this mirrors.
+    candidates["roster_value"] = marginal_value(candidates, result, context["league"], context["board"])
+    candidates = candidates.sort_values("roster_value", ascending=False, kind="stable").reset_index(
+        drop=True
+    )
+
     guidance = composition_guidance(context["plans"], result, context["league"])
     cliffs = position_cliffs(rank_candidates(context["board"], result["taken"]))
     hold = held_positions(result, context["league"], position)
+    fill = must_fill(result, context["league"])
 
     return render_board(
-        withhold(candidates, hold), result, context["league"], limit,
+        restrict(withhold(candidates, hold), fill), result, context["league"], limit,
         degraded=ranked["degraded"], covers_to=ranked["covers_to"], marked=marked,
-        guidance=guidance, position=position, cliffs=withhold(cliffs, hold), hold=hold,
-        id_key=ID_COLUMN, platform_label=PLATFORM_LABEL,
+        guidance=guidance, position=position, cliffs=restrict(withhold(cliffs, hold), fill),
+        hold=hold, fill=fill, id_key=ID_COLUMN, platform_label=PLATFORM_LABEL,
     )
 
 

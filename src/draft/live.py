@@ -119,6 +119,7 @@ from src.draft.marks import combine, read_mark
 from src.draft.picks import ingest_picks, picks_made
 from src.draft.refresh import fingerprint, status_line
 from src.draft.render import render_board
+from src.draft.roster import marginal_value, must_fill, restrict
 from src.draft.seat import check_priced_for, resolve_seat
 from src.draft.waiting import rank_by_cost_of_waiting
 from src.query import WAREHOUSE_PATH, q
@@ -378,6 +379,12 @@ def screen(
     
     `position` is also what lifts the hold on kickers and defenses: a drafter who has named the
     position has asked the question `hold` exists to stop asking on his behalf.
+
+    Issue #77: the ranking above is roster-blind by design (see `waiting.py` and `candidates.py`),
+    so `roster.marginal_value` is applied here, after it, rather than fed back into it — the same
+    reason the position filter and the hold are both applied here rather than upstream. `PoR` and
+    `cost_of_waiting` are left exactly as the board and the survival model priced them; only the
+    order of the list changes, by the value column this adds beside them.
     """
     marked = list(marked)
     result = ingest_picks(combine(picks, marked), context["board"], context["league"])
@@ -388,6 +395,14 @@ def screen(
     # Joining on `player_id` is the same identity the whole feature runs on.
     candidates = ranked["candidates"].merge(
         context["board"][["player_id", "bye_week"]], on="player_id", how="left"
+    )
+
+    # A candidate's value to this roster, not to a freely available one — see roster.py. The sort
+    # is stable, so two candidates this does not tell apart keep the cost-of-waiting order they
+    # already arrived in.
+    candidates["roster_value"] = marginal_value(candidates, result, context["league"], context["board"])
+    candidates = candidates.sort_values("roster_value", ascending=False, kind="stable").reset_index(
+        drop=True
     )
 
     # Beside the ranking, never in it: the guidance is read from the plan table and says what a
@@ -407,10 +422,15 @@ def screen(
     # could still argue for the round-7 kicker the list has stopped offering.
     hold = held_positions(result, context["league"], position)
 
+    # The endgame restriction, same two-frame treatment as the hold: a board narrowed to K and DST
+    # in the last picks must agree with itself, so the depth block goes through it too.
+    fill = must_fill(result, context["league"])
+
     return render_board(
-        withhold(candidates, hold), result, context["league"], limit,
+        restrict(withhold(candidates, hold), fill), result, context["league"], limit,
         degraded=ranked["degraded"], covers_to=ranked["covers_to"], marked=marked,
-        guidance=guidance, position=position, cliffs=withhold(cliffs, hold), hold=hold,
+        guidance=guidance, position=position, cliffs=restrict(withhold(cliffs, hold), fill),
+        hold=hold, fill=fill,
     )
 
 
