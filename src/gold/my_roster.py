@@ -33,7 +33,10 @@ same shape of trouble: a resolved team with no rostered players. None of those a
 yet" — they are every one of them a fact this code got the identity or the timing wrong, and a
 roster of zero players downstream would price a lineup that starts nobody without saying why. So
 both arms raise the moment the player list comes back empty, rather than handing back an empty
-frame that reads exactly like a legitimately roster-less team.
+frame that reads exactly like a legitimately roster-less team. This is why `my_roster` was left out
+of `scripts/build_warehouse.sh` until this league's ESPN draft had actually happened — before then,
+`espn_player_ownership` carried no `ONTEAM` rows at all, and every build would have hit this
+refusal.
 
 ## Where the two identities configured elsewhere come from
 
