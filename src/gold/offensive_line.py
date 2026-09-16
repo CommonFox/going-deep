@@ -21,13 +21,20 @@ from pathlib import Path
 import duckdb
 
 from src import console
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
 # PFR reports a player's season as a single "2TM"/"3TM" row when they changed teams, instead of
 # splitting it per team — that row can't be attributed to one team's O-line, so it's dropped.
-_BUILD_SQL = """
+#
+# Scoped to `src.gold.seasons.completed_seasons`: PFR's charting publishes on a season-end
+# cadence, not weekly, so `pfr_advstats_*` currently stays empty for the season in progress
+# regardless (nfl_data.py's docstring) — but that's this table's only protection against grading
+# a season's O-line on a fraction of its snaps, ranked in the same percentile as full seasons, so
+# it's enforced here rather than left to depend on PFR never changing that cadence.
+_BUILD_SQL = f"""
 CREATE OR REPLACE TABLE offensive_line_grades AS
 WITH pass_block AS (
     SELECT
@@ -36,6 +43,7 @@ WITH pass_block AS (
         SUM(times_pressured) / SUM(pass_attempts) AS pressure_rate_allowed
     FROM pfr_advstats_pass
     WHERE team NOT IN ('2TM', '3TM') AND pass_attempts > 0
+        AND season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY season, normalize_team(team)
 ),
 run_block AS (
@@ -45,6 +53,7 @@ run_block AS (
         SUM(ybc) / SUM(att) AS run_block_ybc_per_att
     FROM pfr_advstats_rush
     WHERE tm NOT IN ('2TM', '3TM') AND pos IN ('RB', 'FB') AND att > 0
+        AND season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY season, normalize_team(tm)
 ),
 combined AS (

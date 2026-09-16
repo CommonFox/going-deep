@@ -75,9 +75,10 @@ leaves the ordering, and therefore the draft decision, untouched.
 
 ## Tables
 
-- `punter_seasons` — every punter-season 2015-2025, scored week by week under league rules (the
-  tier bonus is per game, so it cannot be computed from season totals), with the volume and rate
-  components each projection is built out of.
+- `punter_seasons` — every *completed* punter-season (`src.gold.seasons`, since `weekly_stats` now
+  carries the season in progress too), scored week by week under league rules (the tier bonus is
+  per game, so it cannot be computed from season totals), with the volume and rate components each
+  projection is built out of.
 - `punter_projections` — the upcoming season, one row per rostered punter, carrying this model's
   projection *and* ESPN's as separate named columns alongside the blend, so a disagreement between
   the two stays visible instead of being averaged away.
@@ -91,6 +92,7 @@ import numpy as np
 import pandas as pd
 
 from src import console
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -206,7 +208,7 @@ def _weekly_sql(scoring: pd.Series) -> str:
     """
 
 
-_SEASON_SQL = """
+_SEASON_SQL = f"""
 SELECT
     player_id,
     ANY_VALUE(player_name) AS player_name,
@@ -230,6 +232,10 @@ SELECT
     SUM(returned) AS returned, SUM(touchbacks) AS touchbacks,
     SUM(fair_catches) AS fair_catches, SUM(punt_yards) AS punt_yards
 FROM weekly_punts
+-- weekly_stats (and so weekly_punts) now carries the season in progress alongside finished ones
+-- (#115); a punter-season this incomplete would otherwise walk straight into _walk_forward's
+-- backtest below as a real, tiny "actual" to score projections against.
+WHERE season IN ({COMPLETED_SEASONS_SQL})
 GROUP BY player_id, season
 ORDER BY season, points DESC
 """

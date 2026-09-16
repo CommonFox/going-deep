@@ -22,6 +22,7 @@ from pathlib import Path
 import duckdb
 
 from src import console
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 from src.silver.teams import normalize_team
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -34,7 +35,7 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 # resolved from each player's most-played team across that season's weekly (week 1-18) rows,
 # which also handles in-season trades more sensibly than whatever the aggregate row happened to
 # carry.
-_BUILD_SQL = """
+_BUILD_SQL = f"""
 CREATE OR REPLACE TABLE skill_position_grades AS
 WITH team_by_player_season AS (
     SELECT
@@ -47,7 +48,13 @@ WITH team_by_player_season AS (
             ORDER BY COUNT(*) DESC, MAX(week) DESC, team_abbr
         ) AS rn
     FROM ngs_data
+    -- ngs_data now carries the season in progress too (#115); this table's percentiles are ranked
+    -- within a season (PARTITION BY season, ...), so a partial season would just rank its teams
+    -- against each other on a handful of weeks rather than being wrong relative to history — but
+    -- nothing downstream reads this table's own target_season, only target_season - 1
+    -- (inhouse_projections.py), so a live-season row here would only ever be noise, never signal.
     WHERE week BETWEEN 1 AND 18 AND team_abbr IS NOT NULL
+        AND season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY stat_type, season, player_gsis_id, team_abbr
 ),
 receiving_agg AS (

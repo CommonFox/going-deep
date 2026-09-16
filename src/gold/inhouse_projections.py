@@ -31,7 +31,10 @@ similarly, never toward what young ascending players specifically tend to do nex
 
 Label: actual PPG in `target_season`, only for players who played >= the same games-played floor
 `player_baselines.py` uses (imported, not redefined) — an actual season cut short by injury is as
-untrustworthy a training target as a short season is a baseline input.
+untrustworthy a training target as a short season is a baseline input. Also only for a
+`target_season` that `src.gold.seasons.completed_seasons` says is actually over: `weekly_stats`
+carries the season in progress too (#115), and a games-played floor alone stops protecting this
+label the moment enough of the live season has been played to clear it.
 
 A second, much smaller model covers everyone the arm above structurally cannot see: players with no
 `player_weighted_baselines` row for the season, because they have never put together a season of
@@ -128,7 +131,13 @@ from src.gold.player_baselines import (
     _MIN_GAMES_PLAYED,
     _SKILL_POSITIONS,
 )
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 from src.silver.teams import normalize_team
+
+# The most recent season with a real outcome to label against. Both season labels below guard on
+# this rather than on weekly_stats having *any* row for a season, because weekly_stats now carries
+# the season in progress too (#115) — the moment it does, "has a row" stops meaning "is over".
+_MAX_COMPLETED_SEASON_SQL = f"(SELECT MAX(season) FROM ({COMPLETED_SEASONS_SQL}))"
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -291,6 +300,11 @@ actual_scoring AS (
     WHERE season_type = 'REG'
         AND fantasy_points_ppr IS NOT NULL
         AND position IN {_SKILL_POSITIONS}
+        -- weekly_stats now carries the season in progress too (#115); the games-played floor
+        -- below stops that season from labelling a low-game player, but says nothing once enough
+        -- games accumulate mid-season, which would otherwise train on (and backtest against) a
+        -- partial season's rate as though it were the real, finished one.
+        AND season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY player_id, season
     HAVING COUNT(*) >= {_MIN_GAMES_PLAYED}
 ),
@@ -324,11 +338,12 @@ SELECT
     -- weekly_stats row didn't play, rather than being unobserved, and 0 is the honest label. That
     -- is exactly the bias the veteran games model still carries and this one doesn't.
     --
-    -- Guarded on the season having actually been played: without it the live season's rookies,
-    -- who have no weekly_stats rows because the season hasn't started, would every one of them be
-    -- labelled a genuine 0 and train the games model to predict that nobody plays.
+    -- Guarded on the season having actually finished: without it, the live season's rookies —
+    -- who have few or no weekly_stats rows this early, not because the season hasn't started but
+    -- because it hasn't finished — would be labelled a real (near-)0 and train the games model to
+    -- predict that nobody plays.
     CASE
-        WHEN r.season <= (SELECT MAX(season) FROM weekly_stats)
+        WHEN r.season <= {_MAX_COMPLETED_SEASON_SQL}
         THEN COALESCE(av.actual_games, 0)
     END AS actual_games
 FROM roster_facts r
@@ -388,6 +403,11 @@ actual_scoring AS (
     WHERE season_type = 'REG'
         AND fantasy_points_ppr IS NOT NULL
         AND position IN {_SKILL_POSITIONS}
+        -- weekly_stats now carries the season in progress too (#115); the games-played floor
+        -- below stops that season from labelling a low-game player, but says nothing once enough
+        -- games accumulate mid-season, which would otherwise train on (and backtest against) a
+        -- partial season's rate as though it were the real, finished one.
+        AND season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY player_id, season
     HAVING COUNT(*) >= {_MIN_GAMES_PLAYED}
 ),
@@ -408,9 +428,10 @@ roster_seasons AS (
     SELECT DISTINCT player_id, season
     FROM rosters
     WHERE position IN {_SKILL_POSITIONS}
-        -- Without this the live season, whose rosters are published but whose games haven't been
-        -- played, would label every player a real 0.
-        AND season <= (SELECT MAX(season) FROM weekly_stats)
+        -- Without this the live season, whose rosters are published but whose games haven't
+        -- finished being played, would label every player a real 0 well before that's a fact
+        -- rather than a guess about how the rest of the season goes.
+        AND season <= {_MAX_COMPLETED_SEASON_SQL}
 ),
 appearances AS (
     SELECT player_id, season, COUNT(*) AS games

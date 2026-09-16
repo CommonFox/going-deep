@@ -39,6 +39,11 @@ useful feature (workload correlates with role).
 
 This is a feature-engineering building block, not a projection itself — it feeds
 inhouse_projections.py, which imports the column lists below rather than restating them.
+
+Every season a player's stats are drawn from is one `src.gold.seasons.completed_seasons` says is
+finished — the target-season generation below assumes the most recent season in `season_stats` is
+whichever one just finished, and a partial season would otherwise make that true before it
+actually is.
 """
 
 from pathlib import Path
@@ -46,6 +51,7 @@ from pathlib import Path
 import duckdb
 
 from src import console
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -241,6 +247,12 @@ season_stats AS (
     WHERE w.season_type = 'REG'
         AND w.fantasy_points_ppr IS NOT NULL
         AND w.position IN {_SKILL_POSITIONS}
+        -- weekly_stats now carries the season in progress too (#115); a target_season is meant to
+        -- sit one year past the most recent season *in the warehouse*, not one year past whichever
+        -- season most recently crossed the games-played floor mid-season, which would otherwise
+        -- start generating a spurious extra target_season the moment enough players reach 6 games
+        -- in the live season, with that live season standing in as its full-weight prior year.
+        AND w.season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY w.player_id, w.season
     HAVING COUNT(*) >= {_MIN_GAMES_PLAYED}
 ),
