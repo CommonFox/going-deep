@@ -19,7 +19,9 @@ Jinja2==3.1.6
 joblib==1.5.3
 jsonschema-specifications==2025.9.1
 jsonschema==4.26.0
+markdown-it-py==4.2.0
 MarkupSafe==3.0.3
+mdurl==0.1.2
 narwhals==2.24.0
 nfl_data_py==0.3.3
 numpy==1.26.4
@@ -39,6 +41,7 @@ python-multipart==0.0.32
 pytz==2026.3.post1
 referencing==0.37.0
 requests==2.34.2
+rich==15.0.0
 rpds-py==2026.6.3
 scikit-learn==1.9.0
 scipy==1.17.1

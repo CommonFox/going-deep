@@ -471,6 +471,14 @@ def _write(text: str) -> None:
 
     The loop decides where lines end, because the status line deliberately does not end: it is
     written over on the next tick rather than under.
+
+    Deliberately not a `rich.console.Console.print`: `render_board`'s colour is already baked
+    into `text` as real ANSI (see `render.render_board`'s own `console`, built with
+    `force_terminal=True`), and a plain `print` hands those bytes to the terminal unchanged.
+    Routing them back through a `Console` — even via `Text.from_ansi`, which is built for exactly
+    this — silently drops the bare `\\r` the status line overwrites itself with on every tick,
+    since Rich treats it as a line ending to normalise rather than a byte to preserve. That
+    breaks the one thing this function exists to do, so `print` stays.
     """
     print(text, end="", flush=True)
 

@@ -13,11 +13,22 @@ Two things are asserted harder than the rest, because they are the ones that cos
 """
 
 import pandas as pd
+from rich.console import Console
 
 from src.draft.picks import ingest_picks
-from src.draft.render import render_board
+from src.draft.render import render_board as _render_board
 from src.draft.roster import marginal_value
 from src.draft.waiting import rank_by_cost_of_waiting
+
+# Rich decides column widths, wrapping and colour from the console it renders through. Pinning
+# `no_color` and a generous `width` here means every test below keeps asserting on the plain
+# screen exactly as it did before Rich existed — colour is never what any of them checks.
+_CONSOLE = Console(no_color=True, width=200)
+
+
+def render_board(*args, **kwargs):
+    return _render_board(*args, console=_CONSOLE, **kwargs)
+
 
 SLOTS = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPER_FLEX": 1, "K": 1, "DST": 1}
 
@@ -187,6 +198,26 @@ def test_a_clean_draft_shows_no_warning():
     assert "UNMATCHED" not in out
 
 
+# Issue #68: the unmatched warning becomes a bordered panel rather than an ASCII `!!` prefix — the
+# border is the loud, above-everything treatment the ASCII marker was only ever standing in for.
+
+
+# 49. A real border frames the warning; the old ASCII marker is gone, not just supplemented.
+def test_an_unmatched_pick_is_framed_in_a_bordered_block_not_an_ascii_marker():
+    out = render_board(
+        candidates({"player_name": "Bijan Robinson"}),
+        ingested(unmatched=[
+            {"sleeper_id": "12345", "player_name": "Someone Unknown", "position": "WR",
+             "pick_no": 14},
+        ]),
+        LEAGUE,
+    )
+    assert "!!" not in out
+    # A drawn border, not one particular box style's corners — the behaviour being checked is
+    # "framed", not which glyphs `Panel` happens to default to.
+    assert any(glyph in out for glyph in "╭╮╰╯┌┐└┘│─")
+
+
 # 16. A finished draft says so instead of printing `None` for the next pick.
 def test_a_finished_draft_says_so_rather_than_printing_none():
     out = render_board(
@@ -319,6 +350,37 @@ def test_a_candidate_with_no_survival_data_shows_gaps_rather_than_numbers():
     assert "0%" not in row
     # He is still on the board — a missing number hides him from nobody.
     assert "Unpriced Rookie" in row
+
+
+# Issue #68: SURV as a bar beside the percentage, not instead of it — the percentage assertions
+# above keep passing unchanged; these two cases are about the shape added beside them.
+
+
+# 50. A near-certain survivor's bar reads as full; a near-impossible one's reads as empty.
+def test_survival_is_shown_as_a_bar_that_fills_with_the_probability():
+    out = render_board(
+        candidates(
+            {"player_id": "00-0000001", "player_name": "Lock", "p_survives": 1.0},
+            {"player_id": "00-0000002", "player_name": "Longshot", "p_survives": 0.0},
+        ),
+        ingested(),
+        LEAGUE,
+    )
+    assert "█" in line_naming(out, "Lock") and "░" not in line_naming(out, "Lock")
+    assert "░" in line_naming(out, "Longshot") and "█" not in line_naming(out, "Longshot")
+
+
+# 51. No survival data means no bar either — a bar with nothing behind it would read as a real
+# zero rather than as a player the model never priced.
+def test_a_candidate_with_no_survival_data_shows_no_bar():
+    out = render_board(
+        candidates({"player_name": "Unpriced Rookie", "p_survives": None,
+                    "cost_of_waiting": None, "survival_known": False}),
+        ingested(),
+        LEAGUE,
+    )
+    row = line_naming(out, "Unpriced Rookie")
+    assert "█" not in row and "░" not in row
 
 
 def test_a_candidate_with_no_survival_data_reads_as_a_gap_where_it_now_sits():
@@ -754,3 +816,12 @@ def test_a_screen_with_nothing_to_fill_says_nothing_about_it():
     assert "must fill" not in render_board(
         candidates(), ingested(), LEAGUE, fill=fill(set(), active=False)
     )
+
+
+# Issue #68: `console` defaults to one of the renderer's own rather than requiring every caller —
+# `live.py` included — to build one. Every test above exercises the parameter via the module-level
+# fixture; this is the one that checks the default itself still renders a real screen.
+def test_render_board_works_without_a_console_being_passed_in():
+    out = _render_board(candidates({"player_name": "Bijan Robinson"}), ingested(), LEAGUE)
+    assert "Bijan Robinson" in out
+    assert "My roster" in out
