@@ -5,6 +5,10 @@ outcome label and the elite-finish history), `draft_value` (for the ADP-adjusted
 `adp_consensus` (to carry the live season, which has no outcome yet), `players` (birth date and
 rookie season) and `league_settings`.
 
+The `live` split below (`a.season > MAX(season) FROM boom_bust`) depends on `boom_bust` never
+containing the season in progress — true today because `boom_bust` inherits that scope from
+`points_over_replacement` (`src.gold.seasons`), not because this file checks it itself.
+
 The idea comes from a draft-strategy segment that sorts running backs into three groups — a
 "breakout candidate" in year 3 or younger with no RB1 finish yet, a "trusty veteran" in year 7+ or
 aged 27+, and an "RB in his prime" under 27 and/or already holding an RB1 finish — then reads off

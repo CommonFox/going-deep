@@ -109,6 +109,7 @@ from scipy import stats
 from src import console
 from src.gold.lineup_fill import fill_lineup
 from src.gold.points_over_replacement import _SKILL_POSITIONS
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -166,11 +167,23 @@ _SUMMARY_COLUMNS = [
 # The board and its realised outcome, per league. Mirrors draft_value's `_ACTUAL_SQL`: a drafted
 # player with no points_over_replacement row played no games and scored zero, but a gsis_id that
 # never appears in any box score is an unresolved ADP name rather than a bust, and is dropped.
+#
+# Bounded by completed seasons (`src.gold.seasons`), not by weekly_stats having any row for a
+# season: weekly_stats now carries the season in progress too (#115), and points_over_replacement
+# is itself already scoped to completed seasons — a season admitted here that isn't would LEFT JOIN
+# to no `por` row and simulate every draft as if the live season's players had all scored zero.
+#
+# career_appearances is bounded the same way, and for the same class of reason: a gsis_id with
+# zero career appearances through the last completed season but a debut in the live one would
+# otherwise pass this guard and drag every one of its earlier ADP rows in as "real" the moment that
+# debut lands in weekly_stats — caught concretely on Frank Gore Jr.'s gsis_id, whose crosswalk
+# carries ADP rows back to 2015, years before he was draft-eligible.
 _BOARD_SQL = f"""
 WITH career_appearances AS (
     SELECT player_id, COUNT(*) AS games
     FROM weekly_stats
     WHERE season_type = 'REG' AND fantasy_points_ppr IS NOT NULL
+        AND season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY player_id
 ),
 adp AS (
@@ -180,7 +193,7 @@ adp AS (
     WHERE a.consensus_adp IS NOT NULL
         AND a.format = '1qb'
         AND a.position IN {_SKILL_POSITIONS}
-        AND a.season <= (SELECT MAX(season) FROM weekly_stats)
+        AND a.season IN ({COMPLETED_SEASONS_SQL})
 )
 SELECT
     l.league_key,

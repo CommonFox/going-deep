@@ -65,6 +65,7 @@ import duckdb
 
 from src import console
 from src.gold.punters import league_scoring
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -76,7 +77,12 @@ WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 # `returned` is the residual case: nflverse flags fair catches, touchbacks, downed punts, punts out
 # of bounds, blocks and punts into the end zone explicitly, and anything left over is a punt the
 # returner actually ran with.
-_PUNT_FLAGS = """
+#
+# Scoped to `src.gold.seasons.completed_seasons`: `pbp_punts` now carries the season in progress
+# too (#115), and `games` below comes from `schedules`' full slate for the season, played or not —
+# dividing a partial season's punts by a complete season's game count would silently crater every
+# per-game rate for a team that just hasn't played out its year yet.
+_PUNT_FLAGS = f"""
     SELECT
         posteam AS team, defteam AS opponent, season, game_id,
         100 - yardline_100 AS own_yard,
@@ -93,6 +99,7 @@ _PUNT_FLAGS = """
              THEN 0 ELSE 1 END AS returned
     FROM pbp_punts
     WHERE season_type = 'REG' AND yardline_100 IS NOT NULL AND kick_distance IS NOT NULL
+        AND season IN ({COMPLETED_SEASONS_SQL})
 """
 
 

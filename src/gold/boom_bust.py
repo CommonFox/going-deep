@@ -8,6 +8,10 @@ hurt from one who never had the job).
 Step 3 of the "league-winning RB" idea: line each player's actual season up against what his
 preseason draft capital implied, in units that survive a change of league size or scoring format.
 
+Every row here describes how a season *finished*, so there's no live-season row to build the way
+`draft_value.py`/`player_archetypes.py` do — this table inherits its completed-seasons-only scope
+entirely from `points_over_replacement` (`src.gold.seasons`), rather than checking it directly.
+
 ## Two questions, two measures — the absolute one is the point
 
 There are two different things people mean by "did he boom", and conflating them is how this table

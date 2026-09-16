@@ -12,6 +12,12 @@ points, not per-game: this is a value-over-replacement calculation, not a projec
 (games played) should count rather than be normalized away, and low-game players simply rank low
 on their own without needing an artificial games-played floor.
 
+Scoped to `src.gold.seasons.completed_seasons` — `weekly_stats` now carries the season in progress
+alongside finished ones (#115), and a season total needs the season to actually be over, not just a
+games-played floor: a low-game player in a *finished* season is a real, if unremarkable, outcome;
+the same row mid-season is just wrong, and would rank the league's active players in `draft_board`
+and everywhere else against a phantom "worst starter this year" instead of last year's real one.
+
 Replacement level is a combined-flex-pool Value-Based-Drafting calculation: each position's
 dedicated starters (`team_count x slots`) are filled first, then whatever's left over from
 RB/WR/TE is pooled, ranked by points, and FLEX slots (`team_count x flex_slots`) are filled from
@@ -34,6 +40,7 @@ import pandas as pd
 
 from src import console
 from src.gold.league_scoring import STAT_COLUMNS, league_points
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -63,6 +70,7 @@ def _season_totals(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         WHERE season_type = 'REG'
             AND fantasy_points_ppr IS NOT NULL
             AND position IN {_SKILL_POSITIONS}
+            AND season IN ({COMPLETED_SEASONS_SQL})
         GROUP BY player_id, season
     """).df()
 

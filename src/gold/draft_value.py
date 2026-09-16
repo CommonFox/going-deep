@@ -10,6 +10,11 @@ he was worth *more than he cost* — the 3rd overall pick returning a top-3 seas
 not a win, while the same season out of the 9th round is what decides leagues. This table is that
 subtraction.
 
+`actual_value`/`actual_por` only ever cover completed seasons (`src.gold.seasons`): a season still
+being played has no real total yet, and `points_over_replacement` already enforces that upstream —
+this table's own ADP-side filter has to agree with it, or a player from the live season would join
+to no realised-points row at all and read as a total bust rather than as not yet decided.
+
 ## Value is points over replacement, floored at zero
 
 `points_over_replacement` runs negative — arbitrarily so, for a QB25 measured against a QB12
@@ -118,6 +123,7 @@ from sklearn.isotonic import IsotonicRegression
 
 from src import console
 from src.gold.points_over_replacement import _SKILL_POSITIONS, _replacement_levels
+from src.gold.seasons import COMPLETED_SEASONS_SQL
 
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
 
@@ -129,11 +135,19 @@ _MIN_CURVE_ROWS = 60
 # Realised season totals per league and position, with a drafted-but-never-played season carried as
 # a genuine zero. The career-appearances guard separates that real zero from an ADP row whose
 # gsis_id was never a football player — see the module docstring.
+#
+# Bounded to completed seasons, same as everything else here: without it, a gsis_id with zero
+# career appearances through the last completed season but a debut in the live one would suddenly
+# pass this guard and drag every one of its earlier ADP rows in as "real" — caught concretely on
+# Frank Gore Jr.'s gsis_id, whose crosswalk carries ADP rows back to 2015 (years before he was
+# draft-eligible) that a lifetime appearance count would otherwise now unlock as soon as his actual
+# 2026 debut lands in weekly_stats.
 _ACTUAL_SQL = f"""
 WITH career_appearances AS (
     SELECT player_id, COUNT(*) AS games
     FROM weekly_stats
     WHERE season_type = 'REG' AND fantasy_points_ppr IS NOT NULL
+        AND season IN ({COMPLETED_SEASONS_SQL})
     GROUP BY player_id
 ),
 adp AS (
@@ -160,9 +174,13 @@ FROM adp
 CROSS JOIN leagues l
 LEFT JOIN points_over_replacement por
     ON por.player_id = adp.gsis_id AND por.season = adp.season AND por.league_key = l.league_key
--- Only seasons that have actually been played: the live season's ADP rows have no realised side at
--- all, and carrying them here as zeros would label every 2026 first-rounder a total bust.
-WHERE adp.season <= (SELECT MAX(season) FROM weekly_stats)
+-- Only seasons that have actually finished: the live season's ADP rows have no realised side at
+-- all, and carrying them here as zeros would label every 2026 first-rounder a total bust. Bounded
+-- by completed seasons rather than by weekly_stats having any row for a season, since weekly_stats
+-- now carries the season in progress too (#115), and points_over_replacement is itself already
+-- scoped to completed seasons — without this guard matching, a partial season's players would
+-- LEFT JOIN to no `por` row at all and get the exact zero this comment warns against.
+WHERE adp.season IN ({COMPLETED_SEASONS_SQL})
 ORDER BY l.league_key, adp.season, adp.gsis_id
 """
 
