@@ -55,6 +55,7 @@ run src.gold.player_baselines
 run src.gold.depth_charts
 run src.gold.adp_consensus
 run src.gold.league_settings
+run src.gold.game_environment
 # free_agents and my_roster each need only silver tables (sleeper_users/sleeper_rosters/
 # sleeper_players, espn_teams/espn_player_ownership) — neither has a gold dependency, but both
 # live in gold as derived views rather than a raw load.
