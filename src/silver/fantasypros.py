@@ -15,6 +15,7 @@ import pandas as pd
 import requests
 
 from src import console
+from src.silver import snapshots
 
 RAW_DIR = Path("data/raw/fantasypros")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -76,14 +77,77 @@ def load_draft_rankings(raw_path: Path, scoring: str) -> None:
     _load_json_to_table(raw_path, f"fantasypros_draft_rankings_{scoring.replace('-', '_')}")
 
 
-def fetch_weekly_rankings(position: str, week: int) -> Path:
-    """Fetch weekly consensus rankings for a position/week and save raw to JSON."""
+def fetch_weekly_rankings(position: str, season: int, week: int) -> Path:
+    """Fetch weekly consensus rankings for a position/week and archive as a new snapshot.
+
+    Unlike `fetch_draft_rankings`, this is never a single overwritten raw file: rankings for the
+    same (position, season, week) fetched again later in the week are archived alongside the
+    earlier one rather than replacing it (#117) — a Monday ranking and a Thursday one for the same
+    week are different facts. `save_json_snapshot` skips writing when nothing changed since the
+    last snapshot, so rebuilding on a quiet day doesn't grow the archive.
+    """
     players = _get_players(f"{BASE_URL}/{position}.php", params={"week": week})
-    return _save_raw_json(players, f"weekly_{position}_{week}")
+    stem = f"weekly_{position}_{season}_{week}"
+    path, is_new = snapshots.save_json_snapshot(RAW_DIR, stem, players)
+    if is_new:
+        console.archived(path, len(players))
+    else:
+        console.note(f"fantasypros weekly {position} week {week}: unchanged, skipping snapshot")
+    return path
 
 
-def load_weekly_rankings(raw_path: Path, position: str) -> None:
-    _load_json_to_table(raw_path, f"fantasypros_weekly_rankings_{position}")
+# One snapshot's filename, e.g. weekly_qb_2026_2_20260901T120000000000.json — position, season,
+# week and captured_at, in that order. The raw payload carries none of the first three (week is a
+# query parameter, not a response field, and the response has no season at all), so
+# load_weekly_rankings reads them back out of the filename instead.
+_WEEKLY_SNAPSHOT_NAME_RE = re.compile(
+    r"^weekly_(?P<position>[a-z]+)_(?P<season>\d+)_(?P<week>\d+)_(?P<captured_at>\d{8}T\d{12})\.json$"
+)
+
+
+def _season_and_week_from_snapshot_name(path: Path) -> tuple[int, int]:
+    """Recover (season, week) from a weekly-rankings snapshot's filename."""
+    match = _WEEKLY_SNAPSHOT_NAME_RE.match(path.name)
+    if not match:
+        raise ValueError(f"{path} doesn't look like a fantasypros weekly rankings snapshot")
+    return int(match["season"]), int(match["week"])
+
+
+def load_weekly_rankings(position: str, season: int) -> None:
+    """Load every weekly-rankings snapshot archived for this position and season, then materialize
+    the original table name (`fantasypros_weekly_rankings_<position>`) as just each week's most
+    recently captured snapshot — so `weekly_projections.py` and everything else already reading
+    that name keeps working unchanged. The full history lives alongside it, in
+    `fantasypros_weekly_rankings_<position>_snapshots`.
+    """
+    paths = snapshots.existing_snapshots(RAW_DIR, f"weekly_{position}_{season}", "json")
+    if not paths:
+        raise RuntimeError(
+            f"No archived fantasypros weekly rankings found for {position} {season} in {RAW_DIR} "
+            "— run fetch_weekly_rankings first."
+        )
+
+    frames = []
+    for path in paths:
+        season_of, week_of = _season_and_week_from_snapshot_name(path)
+        df = pd.json_normalize(json.loads(path.read_text()))
+        df["season"] = season_of
+        df["week"] = week_of
+        df["captured_at"] = snapshots.captured_at_of(path)
+        frames.append(df)
+    combined = pd.concat(frames, ignore_index=True)
+
+    table_name = f"fantasypros_weekly_rankings_{position}"
+    snapshots_table = f"{table_name}_snapshots"
+
+    WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.execute(f"CREATE OR REPLACE TABLE {snapshots_table} AS SELECT * FROM combined")
+    snapshots.refresh_latest_snapshot(con, table_name, snapshots_table, ["season", "week"])
+    rows = con.execute(f"SELECT count(*) FROM {table_name}").fetchone()[0]
+    con.close()
+
+    console.table(table_name, rows)
 
 
 # FantasyPros' historical ADP-by-year page is a client-rendered app with no server-embedded data
@@ -158,18 +222,36 @@ def _current_week(con: duckdb.DuckDBPyConnection) -> int:
         ) from error
 
 
+def _current_season(con: duckdb.DuckDBPyConnection) -> int:
+    """The season being played, read from sleeper_nfl_state alongside `_current_week`.
+
+    Needed because weekly-rankings snapshots are now archived rather than overwritten (#117) and
+    are keyed on (season, week) — the raw payload carries neither, so both are stamped on at load
+    time rather than read back out of the response.
+    """
+    try:
+        return con.execute("SELECT season FROM sleeper_nfl_state").fetchone()[0]
+    except duckdb.CatalogException as error:
+        raise RuntimeError(
+            "sleeper_nfl_state not found in the warehouse — run src.silver.sleeper "
+            "(load_nfl_state) before src.silver.fantasypros."
+        ) from error
+
+
 if __name__ == "__main__":
     con = duckdb.connect(str(WAREHOUSE_PATH))
     try:
+        current_season = _current_season(con)
         current_week = _current_week(con)
     finally:
         con.close()
-    console.note(f"fantasypros weekly rankings: current week is {current_week}")
+    console.note(f"fantasypros weekly rankings: current season/week is {current_season}/{current_week}")
 
     for scoring_format in DRAFT_SCORING_FORMATS:
         load_draft_rankings(fetch_draft_rankings(scoring_format), scoring_format)
 
     for position in WEEKLY_POSITIONS:
-        load_weekly_rankings(fetch_weekly_rankings(position, current_week), position)
+        fetch_weekly_rankings(position, current_season, current_week)
+        load_weekly_rankings(position, current_season)
 
     load_adp_manual()

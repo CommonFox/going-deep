@@ -54,12 +54,15 @@ position's table, and folding it in would either duplicate him or overwrite his 
 
 ## Why a player can be missing his FantasyPros columns
 
-`fantasypros_weekly_rankings_*` holds only the current NFL week at any moment — `fantasypros.py`
-overwrites each position's table on every build (`CREATE OR REPLACE`), it is never a weekly
-archive. So `fantasypros_rank_ecr`/`fantasypros_pos_rank` are only ever populated for the week
-`sleeper_nfl_state` currently names; every other week's rows carry Sleeper's points with those two
-columns null, same as a deep bench player FantasyPros doesn't rank at all this week — both are the
-same "no signal for this row" case, not a bug.
+`fantasypros_weekly_rankings_*` now accumulates one row set per week it was ever archived for
+(#117: `fantasypros.py` archives a new snapshot per (position, week) rather than overwriting the
+last one, and materializes this table as each week's most recently captured snapshot). This table
+deliberately doesn't read that history yet — the join in `_scoring_arm` pins both sides to
+`sleeper_nfl_state`'s current week, so `fantasypros_rank_ecr`/`fantasypros_pos_rank` are still only
+ever populated for the current week's rows, exactly as before; every other week's rows carry
+Sleeper's points with those two columns null, same as a deep bench player FantasyPros doesn't rank
+at all this week — both are the same "no signal for this row" case, not a bug. Reading the
+now-available history to backfill past weeks' columns is #114, not this table.
 """
 
 from pathlib import Path
@@ -81,10 +84,16 @@ _FANTASYPROS_POSITIONS = {"qb": "QB", "rb": "RB", "wr": "WR", "te": "TE", "k": "
 
 
 def _fantasypros_union() -> str:
-    """Every position-scoped FantasyPros weekly table, tagged with the position it covers."""
+    """Every position-scoped FantasyPros weekly table, tagged with the position it covers.
+
+    `fantasypros_weekly_rankings_*` now accumulates one row set per week it was ever archived for
+    (#117), rather than holding only whatever week was last fetched — so `week` has to come along
+    for `_scoring_arm`'s join to still pick out only the current week's ranking, not every week a
+    player has ever been ranked in.
+    """
     arms = [
         f"""
-        SELECT player_name, player_team_id, '{position}' AS position,
+        SELECT player_name, player_team_id, week, '{position}' AS position,
                rank_ecr AS fantasypros_rank_ecr, pos_rank AS fantasypros_pos_rank
         FROM fantasypros_weekly_rankings_{table}
         """
@@ -95,7 +104,12 @@ def _fantasypros_union() -> str:
 
 def _scoring_arm(scoring: str, points_column: str) -> str:
     """One scoring basis' rows: Sleeper's matching points bucket, joined to this week's FantasyPros
-    rank if the row's week is the one FantasyPros' snapshot currently represents."""
+    rank if the row's week is the one FantasyPros' snapshot currently represents.
+
+    The join pins both sides to `current_week` explicitly (`fp.week` and `sleeper.week` must each
+    equal it, not just each other) so that FantasyPros' now-multi-week table still only ever
+    contributes the current week's ranking here — reading its history is #114, not this table.
+    """
     return f"""
     SELECT
         sleeper.player_id, sleeper.player_name, sleeper.position, sleeper.season, sleeper.week,
@@ -104,6 +118,7 @@ def _scoring_arm(scoring: str, points_column: str) -> str:
     FROM sleeper
     LEFT JOIN fantasypros_resolved fp
         ON fp.player_id = sleeper.player_id
+        AND fp.week = sleeper.current_week
         AND sleeper.week = sleeper.current_week
     """
 
@@ -131,7 +146,7 @@ fantasypros_players AS (
 {_fantasypros_union()}
 ),
 fantasypros_resolved AS (
-    SELECT ids.gsis_id AS player_id, fp.fantasypros_rank_ecr, fp.fantasypros_pos_rank
+    SELECT ids.gsis_id AS player_id, fp.week, fp.fantasypros_rank_ecr, fp.fantasypros_pos_rank
     FROM fantasypros_players fp
     JOIN ids_normalized ids
         ON ids.merge_name = to_merge_name(fp.player_name) AND ids.position = fp.position
@@ -139,7 +154,7 @@ fantasypros_resolved AS (
 
     UNION ALL
 
-    SELECT normalize_team(fp.player_team_id) AS player_id,
+    SELECT normalize_team(fp.player_team_id) AS player_id, fp.week,
            fp.fantasypros_rank_ecr, fp.fantasypros_pos_rank
     FROM fantasypros_players fp
     WHERE fp.position = 'DST'
