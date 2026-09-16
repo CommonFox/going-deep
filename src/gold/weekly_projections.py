@@ -223,16 +223,18 @@ sleeper AS (
 )
 SELECT
     *,
-    (CASE WHEN sleeper_points IS NOT NULL THEN 1 ELSE 0 END)
-        + (CASE WHEN espn_points IS NOT NULL THEN 1 ELSE 0 END) AS num_sources,
-    CASE WHEN sleeper_points IS NOT NULL AND espn_points IS NOT NULL
-         THEN ABS(sleeper_points - espn_points) END AS points_gap,
-    CASE WHEN sleeper_points IS NOT NULL AND espn_points IS NOT NULL
-              AND (sleeper_points + espn_points) != 0
-         THEN ABS(sleeper_points - espn_points) / ((sleeper_points + espn_points) / 2.0) END
-         AS points_gap_pct
+    CASE WHEN points_gap IS NOT NULL AND (sleeper_points + espn_points) != 0
+         THEN points_gap / ((sleeper_points + espn_points) / 2.0) END AS points_gap_pct
 FROM (
+    SELECT
+        *,
+        (CASE WHEN sleeper_points IS NOT NULL THEN 1 ELSE 0 END)
+            + (CASE WHEN espn_points IS NOT NULL THEN 1 ELSE 0 END) AS num_sources,
+        CASE WHEN sleeper_points IS NOT NULL AND espn_points IS NOT NULL
+             THEN ABS(sleeper_points - espn_points) END AS points_gap
+    FROM (
 {"    UNION ALL".join(_scoring_arm(scoring, column) for scoring, column in _SCORINGS.items())}
+    )
 )
 """
 
@@ -253,7 +255,7 @@ def build_weekly_projections() -> None:
         LEFT JOIN (SELECT DISTINCT espn_id FROM draft_board WHERE espn_id IS NOT NULL) db
             ON db.espn_id = CAST(ewp.espn_id AS VARCHAR)
     """).fetchone()
-    if espn_total:
+    if espn_matched < espn_total:
         console.note(
             f"weekly_projections: espn_id join coverage {espn_matched}/{espn_total} "
             f"({espn_matched / espn_total:.0%}) of espn_weekly_projections resolved to a player"
