@@ -1,4 +1,32 @@
-"""Fetch and load nflverse data (via nfl_data_py) into the DuckDB warehouse."""
+"""Fetch and load nflverse data (via nfl_data_py) into the DuckDB warehouse.
+
+Every feed below is asked for every season through `_UPCOMING_SEASON`, not just the ones already
+finished. Two kinds of season sit inside that one range:
+
+- **Forward-looking** feeds (`schedules`, `rosters`, `depth_chart_snapshots`) describe a season
+  *before* it's played, so `_UPCOMING_SEASON` — the one the models project — is exactly the one
+  they need.
+- **Record-of-play** feeds (`weekly_stats`, `snap_counts`, `injuries`, `depth_charts`, `ngs_data`,
+  `ftn_data`, `pbp_punts`, `pfr_advstats_*`) describe a season *after* it's played. Once
+  `_UPCOMING_SEASON` is under way, "after it's played" is true for part of it every week, so these
+  are asked for it too — a feed that's asked for a season it can't yet answer for just returns
+  nothing for that season, the same as it always has for one that hasn't started at all.
+
+The one feed that currently returns nothing for `_UPCOMING_SEASON` in practice is
+`pfr_advstats_pass`/`_rush`/`_rec`: PFR's charting publishes on a season-end cadence, not weekly, so
+the in-progress season stays absent from those tables until the season finishes (checked directly
+against the live feed, week 1 of 2026). Every other record-of-play feed above does publish weekly.
+Each fetch function notes via `console.note()` when a requested season comes back empty, rather
+than treating it as a failure, so a season that stops publishing (or hasn't started yet) shows up
+in build output without stopping the build.
+
+This module never tracks "is this season complete" as a column, because it doesn't need to: a
+season is complete once every regular-season game in `schedules` has a `result`.
+`src/gold/seasons.py` is that predicate, shared by every gold model that assumes a full season
+(a season total, a finish rank, a backtest fold) rather than trusting fetch scope to have kept a
+partial season out — which, as of this module fetching `_UPCOMING_SEASON`'s record of play, it no
+longer does.
+"""
 
 import contextlib
 import io
@@ -32,6 +60,32 @@ def _save_raw(df, filename_stem: str) -> Path:
     return raw_path
 
 
+def _is_not_yet_published(error: Exception) -> bool:
+    """True if `error` is a 404 against a per-season nflverse release file.
+
+    The two shapes a 404 shows up in here: `urllib.error.HTTPError` from a direct
+    `pandas.read_parquet`/`nfl_data_py` call, or `duckdb.HTTPException` from a `read_parquet` run
+    through DuckDB's httpfs. Either means "this season hasn't been published (yet)", the expected
+    case for `_UPCOMING_SEASON` before its first game — anything else is a real failure.
+    """
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code == 404
+    if isinstance(error, duckdb.HTTPException):
+        return error.status_code == 404
+    return False
+
+
+def _note_if_season_missing(df: pd.DataFrame, seasons: list[int], label: str) -> None:
+    """Flag any requested season absent from the fetched rows.
+
+    Expected for `_UPCOMING_SEASON` when a feed hasn't caught up to it yet (or hasn't started
+    publishing it at all) — a finding to record, not a failure to raise over.
+    """
+    missing = sorted(set(seasons) - set(df["season"].unique()))
+    if missing:
+        console.note(f"{label}: no rows for season(s) {missing}")
+
+
 def _load_parquet_to_table(raw_path: Path, table_name: str) -> None:
     """Load a raw parquet file into a DuckDB table (idempotent)."""
     WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -59,11 +113,20 @@ _STATS_PLAYER_URL = (
 
 
 def fetch_weekly_stats(seasons: list[int]) -> Path:
-    """Fetch weekly player stats for the given seasons and save raw to parquet."""
-    df = pd.concat(
-        [pd.read_parquet(_STATS_PLAYER_URL.format(season=season)) for season in sorted(seasons)],
-        ignore_index=True,
-    )
+    """Fetch weekly player stats for the given seasons and save raw to parquet.
+
+    One release file per season, so a season with nothing published yet (`_UPCOMING_SEASON` before
+    its first game) 404s on its own rather than failing every other season in the request.
+    """
+    frames = []
+    for season in sorted(seasons):
+        try:
+            frames.append(pd.read_parquet(_STATS_PLAYER_URL.format(season=season)))
+        except urllib.error.HTTPError as e:
+            if not _is_not_yet_published(e):
+                raise
+    df = pd.concat(frames, ignore_index=True)
+    _note_if_season_missing(df, seasons, "weekly_stats")
     return _save_raw(df, f"weekly_{_seasons_label(seasons)}")
 
 
@@ -97,8 +160,22 @@ def load_rosters(raw_path: Path) -> None:
 
 
 def fetch_snap_counts(seasons: list[int]) -> Path:
-    """Fetch weekly snap counts for the given seasons and save raw to parquet."""
-    df = nfl.import_snap_counts(seasons)
+    """Fetch weekly snap counts for the given seasons and save raw to parquet.
+
+    `import_snap_counts` reads one release file per season internally but concatenates them in a
+    single call, so one missing season (`_UPCOMING_SEASON` before its first game) 404s the whole
+    request. Fetched one season at a time here instead, so that isolates the same way it does for
+    every other feed in this module.
+    """
+    frames = []
+    for season in sorted(seasons):
+        try:
+            frames.append(nfl.import_snap_counts([season]))
+        except urllib.error.HTTPError as e:
+            if not _is_not_yet_published(e):
+                raise
+    df = pd.concat(frames, ignore_index=True)
+    _note_if_season_missing(df, seasons, "snap_counts")
     return _save_raw(df, f"snap_counts_{_seasons_label(seasons)}")
 
 
@@ -119,8 +196,20 @@ def fetch_injuries(seasons: list[int]) -> Path:
     snapshot, so rebuilding on a quiet day doesn't grow the archive — though any real change,
     including to a season completed years ago, currently re-archives the full multi-season fetch
     rather than just the changed rows, which is the simple, accepted tradeoff per #117.
+
+    Like `fetch_snap_counts`, fetched one season at a time: `import_injuries` reads one release
+    file per season but 404s its whole combined request if any single season (`_UPCOMING_SEASON`
+    before its first game) isn't published yet.
     """
-    df = nfl.import_injuries(seasons)
+    frames = []
+    for season in sorted(seasons):
+        try:
+            frames.append(nfl.import_injuries([season]))
+        except urllib.error.HTTPError as e:
+            if not _is_not_yet_published(e):
+                raise
+    df = pd.concat(frames, ignore_index=True)
+    _note_if_season_missing(df, seasons, "injuries")
     path, is_new = snapshots.save_parquet_snapshot(RAW_DIR, "injuries", df)
     if is_new:
         console.archived(path, len(df))
@@ -245,6 +334,7 @@ def fetch_ngs_data(seasons: list[int]) -> Path:
         df["stat_type"] = stat_type
         frames.append(df)
     df = pd.concat(frames, ignore_index=True)
+    _note_if_season_missing(df, seasons, "ngs_data")
     return _save_raw(df, f"ngs_{_seasons_label(seasons)}")
 
 
@@ -255,14 +345,25 @@ def load_ngs_data(raw_path: Path) -> None:
 def fetch_ftn_data(seasons: list[int]) -> Path:
     """Fetch FTN charting data (routes, target quality, play context) and save raw to parquet.
 
-    FTN data is only available from 2022 onward; earlier seasons are dropped.
+    FTN data is only available from 2022 onward; earlier seasons are dropped. Like
+    `fetch_snap_counts`, fetched one season at a time: `import_ftn_data` reads one release file per
+    season and 404s its whole combined request if any single season (`_UPCOMING_SEASON` before its
+    first game) isn't published yet.
     """
     seasons = [s for s in seasons if s >= 2022]
     # import_ftn_data ends with a bare `print('Downcasting floats.')`, which lands mid-build
     # between two table lines. Swallowed at this one call rather than globally, so a genuine
     # message from anywhere else still gets through.
+    frames = []
     with contextlib.redirect_stdout(io.StringIO()):
-        df = nfl.import_ftn_data(seasons)
+        for season in sorted(seasons):
+            try:
+                frames.append(nfl.import_ftn_data([season]))
+            except urllib.error.HTTPError as e:
+                if not _is_not_yet_published(e):
+                    raise
+    df = pd.concat(frames, ignore_index=True)
+    _note_if_season_missing(df, seasons, "ftn_data")
     # Same cross-season dtype inconsistency as rosters' jersey_number/draft_number, this time
     # bool in some seasons' files and float in others.
     df["is_trick_play"] = df["is_trick_play"].astype(float)
@@ -305,21 +406,29 @@ def fetch_pbp_punts(seasons: list[int]) -> Path:
     archiving two orders of magnitude more data than any punt model will ever read. DuckDB pushes
     both down into ranged reads against the remote parquet, so only the relevant column chunks come
     over the wire.
+
+    One release file per season, fetched one at a time: a season with nothing published yet
+    (`_UPCOMING_SEASON` before its first game) raises `duckdb.HTTPException` on its own read rather
+    than failing every other season if it were read in one combined query.
     """
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs;")
     columns = ", ".join(_PUNT_COLUMNS)
-    df = pd.concat(
-        [
-            con.sql(
-                f"SELECT {columns} FROM read_parquet('{_PBP_URL.format(season=season)}') "
-                "WHERE play_type = 'punt'"
-            ).df()
-            for season in sorted(seasons)
-        ],
-        ignore_index=True,
-    )
+    frames = []
+    for season in sorted(seasons):
+        try:
+            frames.append(
+                con.sql(
+                    f"SELECT {columns} FROM read_parquet('{_PBP_URL.format(season=season)}') "
+                    "WHERE play_type = 'punt'"
+                ).df()
+            )
+        except duckdb.HTTPException as e:
+            if not _is_not_yet_published(e):
+                raise
     con.close()
+    df = pd.concat(frames, ignore_index=True)
+    _note_if_season_missing(df, seasons, "pbp_punts")
     return _save_raw(df, f"pbp_punts_{_seasons_label(seasons)}")
 
 
@@ -335,6 +444,7 @@ def fetch_pfr_advstats(stat_type: str, seasons: list[int]) -> Path:
     """
     seasons = [s for s in seasons if s >= 2018]
     df = nfl.import_seasonal_pfr(stat_type, seasons)
+    _note_if_season_missing(df, seasons, f"pfr_advstats_{stat_type}")
     return _save_raw(df, f"pfr_advstats_{stat_type}_{_seasons_label(seasons)}")
 
 
@@ -374,38 +484,30 @@ if __name__ == "__main__":
     # published its player stats yet; in fact nflverse had moved them to the `stats_player` release
     # and nfl_data_py was still asking for the retired one (see _STATS_PLAYER_URL).
     #
-    # Bump _UPCOMING_SEASON once a year, after the last one has been played out.
-    played_seasons = list(range(2015, _UPCOMING_SEASON))
-
-    # Three of these feeds describe a season *before* it's played rather than after, and the
-    # upcoming season is exactly the one the models project — so they're fetched a year further
-    # forward than everything else. The schedule is published in May; depth-chart snapshots run
-    # from the March after the previous season right through the summer, which is what lets
-    # inhouse_projections know who is actually starting for the season it's projecting rather than
-    # inferring role from last year's box scores; and preseason rosters carry `draft_number` and
-    # `years_exp`, which is how the rookie arm gets draft capital and identifies a first-season
-    # player at all. Every other feed here is a record of games already played, and asking for a
-    # season that hasn't happened returns nothing.
+    # Every feed gets the same range, through `_UPCOMING_SEASON` — see the module docstring for why
+    # that's safe for a record-of-play feed even though `_UPCOMING_SEASON` may be in progress, or
+    # not yet started at all right after this constant is bumped. Rosters specifically: the
+    # `players` release is the more natural home for draft capital (`draft_number`/`years_exp`,
+    # which is how the rookie arm identifies a first-season player and its draft capital at all),
+    # but nflverse publishes it there on a long lag — as of the 2026 preseason it still had no 2026
+    # draft class at all, while the roster feed already carried the full board.
     #
-    # Rosters specifically: the `players` release is the more natural home for draft capital, but
-    # nflverse publishes it there on a long lag — as of the 2026 preseason it still had no 2026
-    # draft class at all, while the roster feed already carried the full board. Reading draft
-    # capital from rosters is what makes the rookie arm work in the season it's needed.
-    forward_looking_seasons = played_seasons + [_UPCOMING_SEASON]
+    # Bump _UPCOMING_SEASON once a year, after the last one has been played out.
+    seasons = list(range(2015, _UPCOMING_SEASON + 1))
 
-    load_weekly_stats(fetch_weekly_stats(played_seasons))
-    load_schedules(fetch_schedules(forward_looking_seasons))
-    load_rosters(fetch_rosters(forward_looking_seasons))
-    load_snap_counts(fetch_snap_counts(played_seasons))
-    fetch_injuries(played_seasons)
+    load_weekly_stats(fetch_weekly_stats(seasons))
+    load_schedules(fetch_schedules(seasons))
+    load_rosters(fetch_rosters(seasons))
+    load_snap_counts(fetch_snap_counts(seasons))
+    fetch_injuries(seasons)
     load_injuries()
-    load_depth_charts(fetch_depth_charts(played_seasons))
-    load_depth_chart_snapshots(fetch_depth_chart_snapshots(forward_looking_seasons))
+    load_depth_charts(fetch_depth_charts(seasons))
+    load_depth_chart_snapshots(fetch_depth_chart_snapshots(seasons))
     load_ids(fetch_ids())
     load_players(fetch_players())
-    load_ngs_data(fetch_ngs_data(played_seasons))
-    load_ftn_data(fetch_ftn_data(played_seasons))
-    load_pbp_punts(fetch_pbp_punts(played_seasons))
+    load_ngs_data(fetch_ngs_data(seasons))
+    load_ftn_data(fetch_ftn_data(seasons))
+    load_pbp_punts(fetch_pbp_punts(seasons))
 
     for stat_type in ["pass", "rush", "rec"]:
-        load_pfr_advstats(fetch_pfr_advstats(stat_type, played_seasons), stat_type)
+        load_pfr_advstats(fetch_pfr_advstats(stat_type, seasons), stat_type)
