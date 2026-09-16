@@ -45,11 +45,14 @@ series (see the note on that in §4). `weekly_projections` is not league-specifi
 file per (season, week).
 
 This was close between two options and the deciding argument is that **both existing Streamlit
-pages already query this way** — `lineup_optimizer.py` and `waiver_board.py` both scope every
-`src.query.q()` call to a specific `league_key`/`season`/`week` (`src/web/pages/lineup_optimizer.py`,
-`src/web/pages/waiver_board.py`). A per-(league, week) export is the SPA fetching exactly the slice
-the page was always going to ask for, with the current-week/current-league selector staying a
-client-side choice of *which file*, not a filter over a bigger one. The "one file per table"
+pages already query this way** — `lineup_optimizer.py` and `waiver_board.py` each scope their
+actual data-fetch query (the one that pulls the rows a page renders, as opposed to the unscoped
+`SELECT DISTINCT league_key, ...` each uses to populate its league/week selector) to a specific
+`league_key`/`season`/`week` (`src/web/pages/lineup_optimizer.py`, `src/web/pages/waiver_board.py`).
+A per-(league, week) export is the SPA fetching exactly the slice the page was always going to ask
+for, with the current-week/current-league selector staying a client-side choice of *which file*,
+not a filter over a bigger one — the selector itself becomes a read of the manifest's `available`
+list rather than an unscoped query. The "one file per table"
 alternative would mean shipping and filtering out 17 of 18 weeks' worth of `waiver_rankings` (71 KB
 gzipped) to render one — cheap in absolute terms here, but it's the wrong direction as
 `weekly_player_context` (#124) lands and tables get wider.
