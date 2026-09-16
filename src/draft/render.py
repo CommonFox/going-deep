@@ -63,14 +63,90 @@ pick clock is how a supply number gets read as an injury number.
 """
 
 import pandas as pd
-
-# Wide enough for the longest name a board actually carries (`Amon-Ra St. Brown`, `Marvin Harrison
-# Jr.`) without wrapping, which would break the column alignment the eye is using to scan.
-_NAME_WIDTH = 24
+from rich import box
+from rich.console import Console
+from rich.padding import Padding
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 # How a value that is not there is written. One character, in a column of numbers, so that it
 # cannot be misread as one.
 _MISSING = "-"
+
+# The standard ANSI 8, not a truecolour palette: they re-theme with the terminal, which is what
+# lets the board survive being read on both a light and a dark one.
+_POSITION_STYLE = {
+    "QB": "red", "RB": "green", "WR": "blue", "TE": "yellow",
+    "K": "magenta", "DST": "cyan", "P": "dim",
+}
+
+# A tail probability as a shape rather than a digit string — ten cells reads faster than a
+# percentage under a pick clock. Kept beside the percentage rather than instead of it, for the
+# same reason every other blended value on this screen keeps its inputs visible.
+_BAR_WIDTH = 10
+_BAR_FULL = "█"
+_BAR_EMPTY = "░"
+
+# Wide enough that nothing on this screen wraps — a wrapped row is a row the eye has to re-find
+# rather than scan. Fixed rather than read from the real terminal, so the function stays pure:
+# the same call always draws the same screen, whatever terminal happens to be running it.
+_DEFAULT_WIDTH = 150
+
+
+def _console() -> Console:
+    """The board's own console: standard-ANSI colour, forced on regardless of where this runs.
+
+    `render_board` is pure — it never writes to a real terminal itself — so nothing here can ask
+    the OS whether one is attached. `force_terminal` bakes the colour codes into the string
+    anyway, which is what lets `live.py`'s `_write` hand that string straight to a real terminal
+    and have it come out in colour. Tests pass their own `console` instead, built with
+    `no_color=True`, and get the identical screen back with the codes stripped.
+    """
+    return Console(width=_DEFAULT_WIDTH, force_terminal=True, color_system="standard")
+
+
+def _maybe_styled(text: str, style: str | None):
+    """A cell as plain text, or as `Text` carrying a style — never both code paths at once.
+
+    Kept to one helper so a styled cell and an unstyled one still measure and wrap identically;
+    `Table` treats a bare string and a `Text` with no markup the same way.
+    """
+    return text if style is None else Text(text, style=style)
+
+
+def _survival_cell(value):
+    """The SURV cell: a filled-proportion bar beside the percentage it is a shape of.
+
+    The percentage stays, spelled exactly as `_percent` already spells it — a ranking is
+    auditable or it is obeyed, and a bar alone would be a glance nobody could check. A missing
+    value gets the same dash every other gap on this screen gets, not an empty bar, which would
+    read as a real zero rather than as a player the model never priced.
+    """
+    if value is None or pd.isna(value):
+        return _MISSING
+    filled = min(max(round(value * _BAR_WIDTH), 0), _BAR_WIDTH)
+    shape = _BAR_FULL * filled + _BAR_EMPTY * (_BAR_WIDTH - filled)
+    return f"{shape} {_percent(value)}"
+
+
+def _cost_style(value, low: float, high: float) -> str | None:
+    """Where a cost sits in the shown board's own range, as dim red through bold red.
+
+    Relative to what is actually on screen rather than to some fixed scale, because a cost of
+    waiting has no natural unit a threshold could be written against — what matters is which rows
+    here are the expensive ones to pass on, not whether 40 is a big number in general.
+    """
+    if value is None or pd.isna(value):
+        return None
+    if high <= low:
+        return "red"
+    fraction = (value - low) / (high - low)
+    if fraction < 1 / 3:
+        return "dim red"
+    if fraction < 2 / 3:
+        return "red"
+    return "bold red"
 
 
 def _text(value) -> str:
@@ -145,42 +221,46 @@ def _marked(marked: list[dict]) -> list[str]:
 
 def _unmatched(
     unmatched: list[dict], id_key: str = "sleeper_id", platform_label: str = "Sleeper"
-) -> list[str]:
+) -> list:
     """The warning, or nothing at all when there is nothing wrong.
 
-    Named rather than counted: "3 picks could not be matched" tells a drafter that something is
-    wrong without telling him which player to distrust, and the name is the only part he can act
-    on in the ninety seconds he has. `id_key`/`platform_label` name whichever platform ID an
+    A red `Panel` rather than a line prefixed with `!!` — the border is the loud, above-everything
+    treatment the warning has always argued for; `!!` was only ever its ASCII approximation. Named
+    rather than counted inside it: "3 picks could not be matched" tells a drafter that something
+    is wrong without telling him which player to distrust, and the name is the only part he can
+    act on in the ninety seconds he has. `id_key`/`platform_label` name whichever platform ID an
     unmatched entry carries — `espn_picks.ingest_picks` names its own `espn_id`, following the same
     per-platform convention `picks.ingest_picks` already uses for `sleeper_id`.
     """
     if not unmatched:
         return []
 
-    lines = [
-        "",
-        f"!! {len(unmatched)} UNMATCHED "
-        f"{'PICK' if len(unmatched) == 1 else 'PICKS'} — this board may be showing a drafted "
-        "player as available",
-    ]
+    lines = ["this board may be showing a drafted player as available", ""]
     for pick in unmatched:
         number = pick.get("pick_no")
         where = f"pick {number}" if number is not None else "hand-marked"
         lines.append(
-            f"!!   {where:<14}{_text(pick.get('player_name'))} "
+            f"{where:<14}{_text(pick.get('player_name'))} "
             f"({_text(pick.get('position'))}, {platform_label} {_text(pick.get(id_key))})"
         )
-    return lines
+    title = f"{len(unmatched)} UNMATCHED {'PICK' if len(unmatched) == 1 else 'PICKS'}"
+    return ["", Panel("\n".join(lines), title=title, border_style="red", expand=False)]
 
 
-def _roster(roster: pd.DataFrame, league: dict) -> list[str]:
+def _roster(roster: pd.DataFrame, league: dict) -> list:
     """My lineup, one row per slot the league starts, filled against how many it starts."""
     lines = ["", f"My roster — roster {league['roster_id']}"]
     for row in roster.itertuples():
         players = ", ".join(row.players) if row.players else _MISSING
-        # The bench has no target to fill, so it is counted rather than scored out of anything.
-        count = f"{row.filled:>3}" if row.starts == 0 else f"{row.filled}/{row.starts}"
-        lines.append(f"  {row.slot:<12}{count:<5}{players}")
+        label = f"  {row.slot:<12}"
+        if row.starts == 0:
+            # The bench has no target to fill, so it is counted rather than scored — and left
+            # unstyled, since filled/unfilled is not a question that has an answer here.
+            lines.append(f"{label}{row.filled:>3}  {players}")
+            continue
+        count = f"{row.filled}/{row.starts}"
+        style = "green" if row.filled >= row.starts else "red"
+        lines.append(Text(label) + Text(f"{count:<5}", style=style) + Text(players))
     return lines
 
 
@@ -345,10 +425,52 @@ def _must_fill(fill: dict | None) -> str | None:
     )
 
 
+def _candidates_table(shown: pd.DataFrame) -> Padding:
+    """The candidate rows as a `Table` — `box.SIMPLE`, a header rule and nothing else.
+
+    Markup cannot go inside a fixed-width f-string: `f"{name:<24}"` counts the escape
+    characters, so a styled cell would silently break the alignment of every column after it.
+    `Table` measures a cell's visible width correctly whether it carries a style or not, which is
+    the only reason position colour and the cost gradient are affordable here at all. Padded two
+    spaces on the left to match the indent every other block on this screen uses to mark itself as
+    belonging under its heading — see `section` in the test file, which reads that indent back.
+    """
+    costs = shown["cost_of_waiting"].dropna()
+    low = float(costs.min()) if not costs.empty else 0.0
+    high = float(costs.max()) if not costs.empty else 0.0
+
+    table = Table(box=box.SIMPLE, show_edge=False, pad_edge=False, header_style="bold")
+    table.add_column("#", justify="right")
+    table.add_column("POS")
+    table.add_column("PLAYER", no_wrap=True)
+    table.add_column("TM")
+    table.add_column("BYE", justify="right")
+    table.add_column("PoR", justify="right")
+    table.add_column("MINE", justify="right")
+    table.add_column("SURV", justify="right")
+    table.add_column("COST", justify="right")
+
+    for rank, row in enumerate(shown.itertuples(), start=1):
+        position = _text(row.position)
+        style = _POSITION_STYLE.get(position)
+        table.add_row(
+            str(rank),
+            _maybe_styled(position, style),
+            _maybe_styled(_text(row.player_name), style),
+            _text(row.team),
+            _bye(row.bye_week),
+            f"{row.points_over_replacement:.1f}",
+            f"{row.roster_value:.1f}",
+            _survival_cell(row.p_survives),
+            _maybe_styled(_cost(row.cost_of_waiting), _cost_style(row.cost_of_waiting, low, high)),
+        )
+    return Padding(table, (0, 0, 0, 2), expand=False)
+
+
 def _candidates(
     candidates: pd.DataFrame, picks: dict, limit: int, degraded: bool, covers_to: int | None,
     position: str | None = None, hold: dict | None = None, fill: dict | None = None,
-) -> list[str]:
+) -> list:
     """The board that is left, most expensive to pass on first, cut to what fits on a screen.
 
     `position` is what the board has been narrowed to, and is named in the heading rather than
@@ -366,8 +488,6 @@ def _candidates(
         note,
         *([withheld] if withheld else []),
         *([must_fill] if must_fill else []),
-        f"  {'#':>3}  {'POS':<5}{'PLAYER':<{_NAME_WIDTH}}{'TM':<5}{'BYE':>3}{'PoR':>9}{'MINE':>9}"
-        f"{'SURV':>7}{'COST':>9}",
     ]
     if shown.empty:
         # Which position is empty, never just that something is. "Nobody left on the board" under
@@ -376,13 +496,7 @@ def _candidates(
         lines.append(f"  {empty}")
         return lines
 
-    for rank, row in enumerate(shown.itertuples(), start=1):
-        lines.append(
-            f"  {rank:>3}  {_text(row.position):<5}{_text(row.player_name):<{_NAME_WIDTH}}"
-            f"{_text(row.team):<5}{_bye(row.bye_week):>3}"
-            f"{row.points_over_replacement:>9.1f}{row.roster_value:>9.1f}"
-            f"{_percent(row.p_survives):>7}{_cost(row.cost_of_waiting):>9}"
-        )
+    lines.append(_candidates_table(shown))
     return lines
 
 
@@ -401,6 +515,7 @@ def render_board(
     fill: dict | None = None,
     id_key: str = "sleeper_id",
     platform_label: str = "Sleeper",
+    console: Console | None = None,
 ) -> str:
     """The whole screen as one string.
 
@@ -444,6 +559,12 @@ def render_board(
 
     `id_key`/`platform_label` name whichever platform ID an unmatched pick carries — see
     `_unmatched`. Defaulted for Sleeper; `live_espn.py` passes `"espn_id"`/`"ESPN"`.
+
+    `console` is what this screen renders through — see `_console`. Left at its default, the
+    string that comes back carries real ANSI colour, forced in regardless of whether anything is
+    actually attached on the other end, which is what lets `live.py` hand it straight to a real
+    terminal. Tests pass their own, built with `no_color=True`, and every assertion written
+    against the plain screen keeps working exactly as it did before colour existed.
     """
     marked = list(marked)
     lines = [_header(picks, league, marked)]
@@ -453,4 +574,12 @@ def render_board(
     lines += _guidance(guidance)
     lines += _cliffs(cliffs, league)
     lines += _candidates(candidates, picks, limit, degraded, covers_to, position, hold, fill)
-    return "\n".join(lines)
+
+    active = console or _console()
+    with active.capture() as capture:
+        for item in lines:
+            if isinstance(item, str):
+                active.print(item, markup=False, highlight=False, soft_wrap=True)
+            else:
+                active.print(item)
+    return capture.get().rstrip("\n")
