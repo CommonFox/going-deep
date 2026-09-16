@@ -11,6 +11,7 @@ import nfl_data_py as nfl
 import pandas as pd
 
 from src import console
+from src.silver import snapshots
 
 RAW_DIR = Path("data/raw/nfl_data_py")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -106,13 +107,72 @@ def load_snap_counts(raw_path: Path) -> None:
 
 
 def fetch_injuries(seasons: list[int]) -> Path:
-    """Fetch weekly injury reports for the given seasons and save raw to parquet."""
+    """Fetch weekly injury reports for the given seasons and archive as a new snapshot.
+
+    An injury report is a point-in-time status: the same player-week's Wednesday DNP and Friday
+    full participation are two different facts, and nflverse's current-season release updates in
+    place as the week progresses — so, unlike every sibling fetch in this module, a re-fetch is
+    archived alongside the earlier one rather than overwriting it (#117). The stem carries no
+    season range (unlike `weekly_stats`/`schedules`/etc.), since that range grows every year and
+    would otherwise split one continuous archive across differently-named files at each year
+    boundary. `save_parquet_snapshot` skips writing when nothing has changed since the last
+    snapshot, so rebuilding on a quiet day doesn't grow the archive — though any real change,
+    including to a season completed years ago, currently re-archives the full multi-season fetch
+    rather than just the changed rows, which is the simple, accepted tradeoff per #117.
+    """
     df = nfl.import_injuries(seasons)
-    return _save_raw(df, f"injuries_{_seasons_label(seasons)}")
+    path, is_new = snapshots.save_parquet_snapshot(RAW_DIR, "injuries", df)
+    if is_new:
+        console.archived(path, len(df))
+    else:
+        console.note("injuries: unchanged, skipping snapshot")
+    return path
 
 
-def load_injuries(raw_path: Path) -> None:
-    _load_parquet_to_table(raw_path, "injuries")
+def _captured_snapshots(paths: list[Path]) -> list[tuple[Path, str]]:
+    """Pair each path with its captured_at, skipping any that predates snapshot archiving.
+
+    Before #117, `fetch_injuries` overwrote `injuries_<season-range>.parquet` on every build (e.g.
+    `injuries_2015_2025.parquet`) — files that share the new constant `injuries` stem this module
+    globs on, but carry no captured_at suffix at all. Skipping them (rather than raising) is what
+    lets a repo that already has one of these left over from before this ticket keep building.
+    """
+    result = []
+    for path in paths:
+        try:
+            result.append((path, snapshots.captured_at_of(path)))
+        except ValueError:
+            console.note(f"{path.name}: predates snapshot archiving, skipping")
+    return result
+
+
+def load_injuries() -> None:
+    """Load every injuries snapshot archived so far, then materialize `injuries` as just each
+    (season, week)'s most recently captured snapshot — so `draft_board.py` and everything else
+    already reading that name keeps working unchanged. The full history lives alongside it, in
+    `injuries_snapshots`.
+    """
+    paths = _captured_snapshots(snapshots.existing_snapshots(RAW_DIR, "injuries", "parquet"))
+    if not paths:
+        raise RuntimeError(
+            f"No archived injuries snapshots found in {RAW_DIR} — run fetch_injuries first."
+        )
+
+    frames = []
+    for path, captured_at in paths:
+        df = pd.read_parquet(path)
+        df["captured_at"] = captured_at
+        frames.append(df)
+    combined = pd.concat(frames, ignore_index=True)
+
+    WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(WAREHOUSE_PATH))
+    con.execute("CREATE OR REPLACE TABLE injuries_snapshots AS SELECT * FROM combined")
+    snapshots.refresh_latest_snapshot(con, "injuries", "injuries_snapshots", ["season", "week"])
+    rows = con.execute("SELECT count(*) FROM injuries").fetchone()[0]
+    con.close()
+
+    console.table("injuries", rows)
 
 
 # fetch_seasonal_data/load_seasonal_data used to live here, sourced from nfl_data_py's
@@ -337,7 +397,8 @@ if __name__ == "__main__":
     load_schedules(fetch_schedules(forward_looking_seasons))
     load_rosters(fetch_rosters(forward_looking_seasons))
     load_snap_counts(fetch_snap_counts(played_seasons))
-    load_injuries(fetch_injuries(played_seasons))
+    fetch_injuries(played_seasons)
+    load_injuries()
     load_depth_charts(fetch_depth_charts(played_seasons))
     load_depth_chart_snapshots(fetch_depth_chart_snapshots(forward_looking_seasons))
     load_ids(fetch_ids())

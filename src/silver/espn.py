@@ -10,6 +10,7 @@ import requests
 from dotenv import load_dotenv
 
 from src import console
+from src.silver import snapshots
 from src.silver.teams import normalize_team
 
 load_dotenv()
@@ -129,7 +130,16 @@ def load_players(raw_path: Path) -> None:
 
 
 def fetch_player_ownership(league_id: str, season: int) -> Path:
-    """Fetch the player pool with ownership %, ADP, and projections and save raw to JSON."""
+    """Fetch the player pool with ownership %, ADP, and projections, and archive as a new snapshot.
+
+    This player pool carries the one live per-week projection ESPN publishes (see
+    `load_weekly_projections`), which stops existing once the week is over — so, unlike most raw
+    files in this codebase, a re-fetch is archived as a new snapshot rather than overwriting the
+    last one (#117). `load_player_ownership` and `load_projections` (the season-total board) don't
+    need that history and keep reading just the snapshot this returns, exactly as before;
+    `save_json_snapshot` skips writing when nothing has changed since the last one, so rebuilding
+    on a quiet day doesn't grow the archive.
+    """
     data = _get(
         _league_url(league_id, season),
         params={"view": "kona_player_info"},
@@ -139,7 +149,14 @@ def fetch_player_ownership(league_id: str, season: int) -> Path:
             )
         },
     )
-    return _save_raw_json(data["players"], f"player_ownership_{league_id}_{season}")
+    path, is_new = snapshots.save_json_snapshot(
+        RAW_DIR, f"player_ownership_{league_id}_{season}", data["players"]
+    )
+    if is_new:
+        console.archived(path, len(data["players"]))
+    else:
+        console.note(f"espn player pool {league_id}/{season}: unchanged, skipping snapshot")
+    return path
 
 
 def load_player_ownership(raw_path: Path) -> None:
@@ -197,23 +214,13 @@ def load_projections(raw_path: Path, season: int) -> None:
     console.table("espn_projections", len(df))
 
 
-def load_weekly_projections(raw_path: Path, season: int) -> None:
-    """Parse ESPN's own per-week point projection out of the player pool raw file.
+def _weekly_projection_rows(players: list[dict], season: int) -> list[dict]:
+    """Pick out this season's per-week point projections from a player-pool payload.
 
-    Same raw file as `load_projections` (no new network call), but keyed on `scoringPeriodId`
-    instead of pinned to `0`: ESPN's `kona_player_info` view carries the season-total projection
-    (`scoringPeriodId=0`) and, alongside it, one weekly projection row per player for the current
-    NFL week — the same week `fantasypros_weekly_rankings_*` and `sleeper_projections`' populated
-    rows track, and likewise never a weekly archive: this table holds whatever week the raw file
-    was fetched for, overwritten on every build.
-
-    Exists for `waiver_rankings` (#104) to fall back onto when Sleeper's own weekly projection is
-    null for an ESPN free agent — see that module's docstring for why Sleeper's number is missing
-    for so much of ESPN's pool in the first place, and why a second source is worth keeping
-    distinct rather than blended into `sleeper_points`.
+    ESPN's `kona_player_info` view carries the season-total projection (`scoringPeriodId=0`)
+    alongside a weekly one (`scoringPeriodId` = the week) per player; `statSourceId=1` is a
+    projection, as opposed to an actual (`0`) once the week has been played.
     """
-    players = json.loads(raw_path.read_text())
-
     rows = []
     for row in players:
         player = row.get("player", {})
@@ -232,14 +239,48 @@ def load_weekly_projections(raw_path: Path, season: int) -> None:
                         "projected_points": stat.get("appliedTotal"),
                     }
                 )
+    return rows
 
-    df = pd.DataFrame(rows)
+
+def load_weekly_projections(league_id: str, season: int) -> None:
+    """Load every player-pool snapshot archived for this league/season (see
+    `fetch_player_ownership`), then materialize `espn_weekly_projections` as just each week's most
+    recently captured snapshot — so `waiver_rankings` and everything else already reading that name
+    keeps working unchanged. The full history lives alongside it, in
+    `espn_weekly_projections_snapshots`.
+
+    Exists for `waiver_rankings` (#104) to fall back onto when Sleeper's own weekly projection is
+    null for an ESPN free agent — see that module's docstring for why Sleeper's number is missing
+    for so much of ESPN's pool in the first place, and why a second source is worth keeping
+    distinct rather than blended into `sleeper_points`.
+    """
+    paths = snapshots.existing_snapshots(RAW_DIR, f"player_ownership_{league_id}_{season}", "json")
+    if not paths:
+        raise RuntimeError(
+            f"No archived espn player pool snapshots found for {league_id}/{season} in {RAW_DIR} "
+            "— run fetch_player_ownership first."
+        )
+
+    frames = []
+    for path in paths:
+        rows = _weekly_projection_rows(json.loads(path.read_text()), season)
+        df = pd.DataFrame(rows, columns=["espn_id", "position", "season", "week", "projected_points"])
+        df["captured_at"] = snapshots.captured_at_of(path)
+        frames.append(df)
+    combined = pd.concat(frames, ignore_index=True)
+
     WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(WAREHOUSE_PATH))
-    con.execute("CREATE OR REPLACE TABLE espn_weekly_projections AS SELECT * FROM df")
+    con.execute(
+        "CREATE OR REPLACE TABLE espn_weekly_projections_snapshots AS SELECT * FROM combined"
+    )
+    snapshots.refresh_latest_snapshot(
+        con, "espn_weekly_projections", "espn_weekly_projections_snapshots", ["season", "week"]
+    )
+    rows = con.execute("SELECT count(*) FROM espn_weekly_projections").fetchone()[0]
     con.close()
 
-    console.table("espn_weekly_projections", len(df))
+    console.table("espn_weekly_projections", rows)
 
 
 def fetch_transactions(league_id: str, season: int) -> Path:
@@ -271,6 +312,6 @@ if __name__ == "__main__":
     ownership_raw_path = fetch_player_ownership(LEAGUE_ID, SEASON)
     load_player_ownership(ownership_raw_path)
     load_projections(ownership_raw_path, SEASON)
-    load_weekly_projections(ownership_raw_path, SEASON)
+    load_weekly_projections(LEAGUE_ID, SEASON)
     load_transactions(fetch_transactions(LEAGUE_ID, SEASON))
     load_boxscores(fetch_boxscores(LEAGUE_ID, SEASON))

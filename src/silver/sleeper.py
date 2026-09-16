@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 from src import console
+from src.silver import snapshots
 
 RAW_DIR = Path("data/raw/sleeper")
 WAREHOUSE_PATH = Path("data/warehouse.duckdb")
@@ -236,10 +237,14 @@ def load_players(raw_path: Path) -> None:
 
 
 def fetch_projections(season: int, weeks: list[int]) -> Path:
-    """Fetch weekly player projections (public, not league-scoped) and save raw to JSON.
+    """Fetch weekly player projections (public, not league-scoped) and archive as a new snapshot.
 
     This is a different, unauthenticated Sleeper API surface (no /v1 prefix, no league ID) —
-    it's the feed Sleeper's own app uses to show projected points, sourced from RotoWire.
+    it's the feed Sleeper's own app uses to show projected points, sourced from RotoWire. Sleeper
+    publishes all 18 weeks up front, and revises later weeks' projections as they approach — the
+    revision is itself a signal worth keeping, so a re-fetch is archived alongside earlier ones
+    rather than replacing them (#117). `save_json_snapshot` skips writing when nothing has changed
+    since the last snapshot, so rebuilding on a quiet day doesn't grow the archive.
     """
     rows = []
     for week in weeks:
@@ -252,11 +257,16 @@ def fetch_projections(season: int, weeks: list[int]) -> Path:
         for row in week_rows:
             row["week"] = week
         rows.extend(week_rows)
-    return _save_raw_json(rows, f"projections_{season}")
+    path, is_new = snapshots.save_json_snapshot(RAW_DIR, f"projections_{season}", rows)
+    if is_new:
+        console.archived(path, len(rows))
+    else:
+        console.note(f"sleeper projections {season}: unchanged, skipping snapshot")
+    return path
 
 
-def load_projections(raw_path: Path) -> None:
-    """Load weekly projections, keeping all three scoring flavours and projected receptions.
+def _projection_row(row: dict) -> dict:
+    """Map one Sleeper weekly-projection API row into a warehouse row.
 
     Sleeper hands back `pts_std`, `pts_half_ppr` and `pts_ppr` side by side, so a league's own
     reception value is a column choice rather than a conversion — which matters here because the
@@ -265,32 +275,53 @@ def load_projections(raw_path: Path) -> None:
     identity, not an approximation (checked against a real row: 5.17 - 0.5 * 1.78 = 4.28 =
     `pts_half_ppr`), so these receptions are what lets a PPR-only source be restated in half-PPR.
     """
-    data = json.loads(raw_path.read_text())
-    rows = [
-        {
-            "sleeper_id": row.get("player_id"),
-            "player_name": (row.get("player") or {}).get("first_name", "")
-            + " "
-            + (row.get("player") or {}).get("last_name", ""),
-            "position": (row.get("player") or {}).get("position"),
-            "team": row.get("team"),
-            "season": row.get("season"),
-            "week": row.get("week"),
-            "pts_std": (row.get("stats") or {}).get("pts_std"),
-            "pts_half_ppr": (row.get("stats") or {}).get("pts_half_ppr"),
-            "pts_ppr": (row.get("stats") or {}).get("pts_ppr"),
-            "rec": (row.get("stats") or {}).get("rec"),
-        }
-        for row in data
-    ]
-    df = pd.DataFrame(rows)
+    return {
+        "sleeper_id": row.get("player_id"),
+        "player_name": (row.get("player") or {}).get("first_name", "")
+        + " "
+        + (row.get("player") or {}).get("last_name", ""),
+        "position": (row.get("player") or {}).get("position"),
+        "team": row.get("team"),
+        "season": row.get("season"),
+        "week": row.get("week"),
+        "pts_std": (row.get("stats") or {}).get("pts_std"),
+        "pts_half_ppr": (row.get("stats") or {}).get("pts_half_ppr"),
+        "pts_ppr": (row.get("stats") or {}).get("pts_ppr"),
+        "rec": (row.get("stats") or {}).get("rec"),
+    }
+
+
+def load_projections(season: int) -> None:
+    """Load every projections snapshot archived for this season, then materialize
+    `sleeper_projections` as just each (season, week)'s most recently captured snapshot — so
+    `weekly_projections.py`, `consensus.py` and everything else already reading that name keeps
+    working unchanged. The full history — including revisions to a future week's projection — lives
+    alongside it, in `sleeper_projections_snapshots`.
+    """
+    paths = snapshots.existing_snapshots(RAW_DIR, f"projections_{season}", "json")
+    if not paths:
+        raise RuntimeError(
+            f"No archived sleeper projections snapshots found for {season} in {RAW_DIR} — run "
+            "fetch_projections first."
+        )
+
+    frames = []
+    for path in paths:
+        df = pd.DataFrame([_projection_row(row) for row in json.loads(path.read_text())])
+        df["captured_at"] = snapshots.captured_at_of(path)
+        frames.append(df)
+    combined = pd.concat(frames, ignore_index=True)
 
     WAREHOUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(WAREHOUSE_PATH))
-    con.execute("CREATE OR REPLACE TABLE sleeper_projections AS SELECT * FROM df")
+    con.execute("CREATE OR REPLACE TABLE sleeper_projections_snapshots AS SELECT * FROM combined")
+    snapshots.refresh_latest_snapshot(
+        con, "sleeper_projections", "sleeper_projections_snapshots", ["season", "week"]
+    )
+    rows = con.execute("SELECT count(*) FROM sleeper_projections").fetchone()[0]
     con.close()
 
-    console.table("sleeper_projections", len(df))
+    console.table("sleeper_projections", rows)
 
 
 if __name__ == "__main__":
@@ -303,4 +334,5 @@ if __name__ == "__main__":
     load_transactions(fetch_transactions(LEAGUE_ID, WEEKS))
     load_nfl_state(fetch_nfl_state())
     load_players(fetch_players())
-    load_projections(fetch_projections(SEASON, WEEKS))
+    fetch_projections(SEASON, WEEKS)
+    load_projections(SEASON)
