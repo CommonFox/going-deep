@@ -10,15 +10,18 @@ Full test list (see the PR body for the same list with rationale):
  1. `_walk_forward_baselines` computes `season_to_date_ppg` as the mean of strictly prior weeks
  2. `_walk_forward_baselines` computes `last3_ppg` as the mean of up to the three prior weeks
  3. A player's first season week has no walk-forward baseline and is dropped from scoring
- 4. `score_signal` returns one row per position per baseline, plus a pooled "ALL" row
- 5. A signal that *is* the actual outcome (the leak) scores a very high incremental correlation
-    against every baseline, with a small p-value — the harness's own correctness check
- 6. A signal that is pure noise scores an incremental correlation near zero and an insignificant
+ 4. `season_to_date_ppg` resets at a new season rather than carrying the prior one's history in
+ 5. `score_signal` returns one row per position per baseline, plus a pooled "ALL" row
+ 6. A signal that *is* the actual outcome (the leak) scores a high incremental correlation against
+    every baseline, with a small p-value — the harness's own correctness check
+ 7. A signal that is pure noise scores an incremental correlation near zero and an insignificant
     p-value — the other half of the correctness check
- 7. A signal predictive for one position and pure noise for another scores them differently
- 8. Significance clusters by week: `n_weeks` counts distinct weeks contributing to the test, not
+ 8. A signal predictive for one position and pure noise for another scores them differently
+ 9. Significance clusters by week: `n_weeks` counts distinct weeks contributing to the test, not
     player-week rows, and a single-week sample can't produce a t-test (NaN, not a crash)
- 9. Every row of the output carries `n` and `n_weeks`, whatever their values
+10. A row with enough clustered weeks also reports a 95% confidence interval on the same clustered
+    effect the t-test judges, bracketing it and ordered low <= high
+11. Every row of the output carries `n` and `n_weeks`, whatever their values
 
 Every fixture is a small hand-built DataFrame — no warehouse — since these are exactly the kind of
 "deliberately-leaked" and "deliberately-null" constructions the ticket calls for as ground truth
@@ -242,7 +245,7 @@ def test_significance_clusters_by_week_and_degrades_to_nan_with_one_week():
     assert pd.isna(row_one_week["ci_high"])
 
 
-# 11. The acceptance criterion is "sample sizes *and confidence intervals* on every output": a row
+# 10. The acceptance criterion is "sample sizes *and confidence intervals* on every output": a row
 #     with enough clustered weeks to run the significance test also reports a 95% CI on the same
 #     clustered effect, bracketing the mean and ordered low <= high.
 def test_a_confidence_interval_is_reported_alongside_significance():
@@ -262,7 +265,7 @@ def test_a_confidence_interval_is_reported_alongside_significance():
     assert row["ci_low"] > 0
 
 
-# 10. Every row carries its sample sizes, whatever their values — the acceptance criterion that a
+# 11. Every row carries its sample sizes, whatever their values — the acceptance criterion that a
 #     result is only as good as the n it's read alongside.
 def test_every_row_reports_n_and_n_weeks():
     fixture = _weekly_fixture(

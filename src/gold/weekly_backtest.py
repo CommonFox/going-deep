@@ -23,13 +23,18 @@ happens. The third baseline, the vendor's own weekly projection, needs no such t
 published before kickoff by construction of its source, not derived from this warehouse's own
 history.
 
-Significance is clustered by week, not by player-week: weather and game environment correlate
-outcomes within a week the same way one season's injuries correlate every RB-heavy draft in
-`draft_strategy.py`, so the test runs on one correlation per week rather than pooling every row as
-independent. A week with too few player-weeks to compute a meaningful within-week correlation is
-excluded from that count rather than propagating a noisy value into the average — the reason `n`
-(player-weeks in the sample) and `n_weeks` (weeks the significance test actually clustered over) are
-both reported on every row, alongside every other number, rather than trusted to be adequate.
+Every correlation reported — not just its significance — is clustered by week rather than pooled
+across the whole sample: weather and game environment correlate outcomes within a week the same way
+one season's injuries correlate every RB-heavy draft in `draft_strategy.py`, so a correlation pooled
+across weeks can pick up cross-week structure (a season-long scoring drift, bye-week timing) that has
+nothing to do with the within-week relationship being asked about. `_score_group` computes one
+correlation per eligible week and reports the mean, which is also what the significance test and
+confidence interval run on — the headline number and the test attached to it are the same quantity,
+not two different ones that happen to sit in the same row. A week with too few player-weeks to
+compute a meaningful within-week correlation is excluded rather than propagating a noisy value into
+the average — the reason `n` (player-weeks in the sample) and `n_weeks` (weeks that actually
+contributed) are both reported on every row, alongside every other number, rather than trusted to be
+adequate.
 """
 
 import pandas as pd
@@ -70,41 +75,42 @@ def _rho(a: pd.Series, b: pd.Series) -> float:
 
 
 def _score_group(group: pd.DataFrame, baseline_col: str) -> dict:
-    """Score one (position, baseline) slice: the baseline's own accuracy (parity), the signal's raw
-    correlation with the outcome, and the headline incremental correlation — the signal against what
-    the baseline's own error leaves unexplained — with significance clustered by week.
+    """Score one (position, baseline) slice as a per-week average, not one correlation pooled across
+    every row. Pooling across weeks is not the same computation as averaging one number per week —
+    unlike a mean, a correlation pooled across the clustering variable can pick up cross-week
+    structure (a season-long scoring drift, bye-week timing) that clustering exists specifically to
+    keep out, so `baseline_rho` (the baseline's own accuracy), `signal_rho` (the signal's raw
+    accuracy) and `incremental_rho` (the headline: the signal against what the baseline's error
+    leaves unexplained) are each the mean of one number per eligible week, the same population the
+    significance test below runs on.
     """
-    residual = group["actual_points"] - group[baseline_col]
-
-    weekly_rhos = []
+    weekly = []
     for _, week_group in group.groupby("week"):
         if len(week_group) < _MIN_WEEK_ROWS:
             continue
         week_residual = week_group["actual_points"] - week_group[baseline_col]
-        rho = _rho(week_group["signal_value"], week_residual)
-        if pd.notna(rho):
-            weekly_rhos.append(rho)
+        weekly.append({
+            "baseline_rho": _rho(week_group[baseline_col], week_group["actual_points"]),
+            "signal_rho": _rho(week_group["signal_value"], week_group["actual_points"]),
+            "incremental_rho": _rho(week_group["signal_value"], week_residual),
+        })
+    weekly = pd.DataFrame(weekly, columns=["baseline_rho", "signal_rho", "incremental_rho"])
 
-    if len(weekly_rhos) > 1:
-        t_stat, p_value = stats.ttest_1samp(weekly_rhos, 0.0)
-        # The 95% CI on the same clustered quantity the t-test judges — the mean per-week
-        # incremental correlation — rather than on incremental_rho below, which is pooled over
-        # every row and answers a different question (draft_strategy.py's _summarize reports its
-        # headline number and its significance test on two populations the same way: pooled mean,
-        # clustered test).
+    incremental = weekly["incremental_rho"].dropna()
+    if len(incremental) > 1:
+        t_stat, p_value = stats.ttest_1samp(incremental, 0.0)
         ci_low, ci_high = stats.t.interval(
-            0.95, df=len(weekly_rhos) - 1, loc=pd.Series(weekly_rhos).mean(),
-            scale=stats.sem(weekly_rhos),
+            0.95, df=len(incremental) - 1, loc=incremental.mean(), scale=stats.sem(incremental),
         )
     else:
         t_stat = p_value = ci_low = ci_high = float("nan")
 
     return {
         "n": len(group),
-        "n_weeks": len(weekly_rhos),
-        "baseline_rho": _rho(group[baseline_col], group["actual_points"]),
-        "signal_rho": _rho(group["signal_value"], group["actual_points"]),
-        "incremental_rho": _rho(group["signal_value"], residual),
+        "n_weeks": len(incremental),
+        "baseline_rho": weekly["baseline_rho"].mean(),
+        "signal_rho": weekly["signal_rho"].mean(),
+        "incremental_rho": incremental.mean() if len(incremental) else float("nan"),
         "t_stat": t_stat,
         "p_value": p_value,
         "ci_low": ci_low,
