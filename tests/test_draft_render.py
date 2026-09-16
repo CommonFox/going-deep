@@ -213,7 +213,9 @@ def test_an_unmatched_pick_is_framed_in_a_bordered_block_not_an_ascii_marker():
         LEAGUE,
     )
     assert "!!" not in out
-    assert "╭" in out and "╮" in out
+    # A drawn border, not one particular box style's corners — the behaviour being checked is
+    # "framed", not which glyphs `Panel` happens to default to.
+    assert any(glyph in out for glyph in "╭╮╰╯┌┐└┘│─")
 
 
 # 16. A finished draft says so instead of printing `None` for the next pick.

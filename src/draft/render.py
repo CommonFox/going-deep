@@ -64,7 +64,7 @@ pick clock is how a supply number gets read as an injury number.
 
 import pandas as pd
 from rich import box
-from rich.console import Console
+from rich.console import Console, RenderableType
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
@@ -73,6 +73,11 @@ from rich.text import Text
 # How a value that is not there is written. One character, in a column of numbers, so that it
 # cannot be misread as one.
 _MISSING = "-"
+
+
+def _absent(value) -> bool:
+    """Pandas' two spellings of "not there" — `None` and its own `NA`/`nan` — as one check."""
+    return value is None or pd.isna(value)
 
 # The standard ANSI 8, not a truecolour palette: they re-theme with the terminal, which is what
 # lets the board survive being read on both a light and a dark one.
@@ -123,7 +128,7 @@ def _survival_cell(value):
     value gets the same dash every other gap on this screen gets, not an empty bar, which would
     read as a real zero rather than as a player the model never priced.
     """
-    if value is None or pd.isna(value):
+    if _absent(value):
         return _MISSING
     filled = min(max(round(value * _BAR_WIDTH), 0), _BAR_WIDTH)
     shape = _BAR_FULL * filled + _BAR_EMPTY * (_BAR_WIDTH - filled)
@@ -137,7 +142,7 @@ def _cost_style(value, low: float, high: float) -> str | None:
     waiting has no natural unit a threshold could be written against — what matters is which rows
     here are the expensive ones to pass on, not whether 40 is a big number in general.
     """
-    if value is None or pd.isna(value):
+    if _absent(value):
         return None
     if high <= low:
         return "red"
@@ -151,14 +156,14 @@ def _cost_style(value, low: float, high: float) -> str | None:
 
 def _text(value) -> str:
     """One cell, with pandas' spellings of absence turned into a visible gap."""
-    if value is None or pd.isna(value):
+    if _absent(value):
         return _MISSING
     return str(value)
 
 
 def _bye(value) -> str:
     """A bye week as a plain week number — the board stores it as a nullable integer."""
-    if value is None or pd.isna(value):
+    if _absent(value):
         return _MISSING
     return str(int(value))
 
@@ -169,14 +174,14 @@ def _percent(value) -> str:
     Whole percent, because the third decimal place of a tail probability is not a thing anyone
     should be deciding a pick on and a wider column costs a name its space.
     """
-    if value is None or pd.isna(value):
+    if _absent(value):
         return _MISSING
     return f"{value * 100:.0f}%"
 
 
 def _cost(value) -> str:
     """Cost of waiting, in the same units and to the same precision as the value beside it."""
-    if value is None or pd.isna(value):
+    if _absent(value):
         return _MISSING
     return f"{value:.1f}"
 
@@ -221,7 +226,7 @@ def _marked(marked: list[dict]) -> list[str]:
 
 def _unmatched(
     unmatched: list[dict], id_key: str = "sleeper_id", platform_label: str = "Sleeper"
-) -> list:
+) -> list[RenderableType]:
     """The warning, or nothing at all when there is nothing wrong.
 
     A red `Panel` rather than a line prefixed with `!!` — the border is the loud, above-everything
@@ -247,7 +252,7 @@ def _unmatched(
     return ["", Panel("\n".join(lines), title=title, border_style="red", expand=False)]
 
 
-def _roster(roster: pd.DataFrame, league: dict) -> list:
+def _roster(roster: pd.DataFrame, league: dict) -> list[RenderableType]:
     """My lineup, one row per slot the league starts, filled against how many it starts."""
     lines = ["", f"My roster — roster {league['roster_id']}"]
     for row in roster.itertuples():
@@ -266,7 +271,7 @@ def _roster(roster: pd.DataFrame, league: dict) -> list:
 
 def _signed(value) -> str:
     """A band's score, with the sign written out — the direction is the whole of the reading."""
-    if value is None or pd.isna(value):
+    if _absent(value):
         return _MISSING
     return f"{value:+.1f}"
 
@@ -470,7 +475,7 @@ def _candidates_table(shown: pd.DataFrame) -> Padding:
 def _candidates(
     candidates: pd.DataFrame, picks: dict, limit: int, degraded: bool, covers_to: int | None,
     position: str | None = None, hold: dict | None = None, fill: dict | None = None,
-) -> list:
+) -> list[RenderableType]:
     """The board that is left, most expensive to pass on first, cut to what fits on a screen.
 
     `position` is what the board has been narrowed to, and is named in the heading rather than
