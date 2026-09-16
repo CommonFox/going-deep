@@ -90,11 +90,16 @@ scoring the way Sleeper does — so `espn_points` (and the three columns above) 
 across a player-week's `ppr` and `half_ppr` rows, exactly like `fantasypros_rank_ecr` already does
 for the same reason.
 
-`espn_weekly_projections` is itself now a snapshot archive (#117), but as of this table's build it
-holds only whichever weeks a build has actually run in — one week today. So `espn_points` is
-populated for that week and null everywhere else, the same "no signal for this row yet" case
-described above for FantasyPros, not a bug: it fills in as more weeks get built, the same way the
-FantasyPros columns will once #114 reads that history back in.
+`espn_weekly_projections` is itself now a snapshot archive (#117): it materializes as just each
+key's most recently captured snapshot, with the full history alongside it in
+`espn_weekly_projections_snapshots`. This table joins the materialized name, deliberately not the
+history — it surfaces ESPN's current number, not a backfill of past weeks; reading the snapshot
+history to backfill is #114's job, not this table's, the same division `fantasypros_resolved`
+already draws above. The archive began capturing in week 2 of 2026, so `espn_points` is populated
+for week 2 onward and null for week 1 and for any future week ESPN hasn't published a number for
+yet — the same "no signal for this row yet" case described above for FantasyPros, not a bug: it
+fills in as more weeks get captured, the same way the FantasyPros columns will once #114 reads that
+history back in.
 """
 
 from pathlib import Path
