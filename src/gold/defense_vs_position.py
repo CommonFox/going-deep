@@ -15,15 +15,27 @@ that position group put up against that defense in that one game.
 
 ## Scoped to skill positions, not every slot a league starts
 
-The obvious reading of "every position the league starts" would reach for `league_settings`' K and
-DST slots too. Neither is buildable from what this warehouse carries: `league_settings` has no
-scoring coefficients for kicking at all (`league_points` only ever multiplies pass/rush/rec/fumble
-stats), so a kicker's row would always be a fabricated zero rather than an absence; and DST is a
-team-level fact with no `weekly_stats` rows to aggregate — there is no "player" on defense here to
-sum. `points_over_replacement.py` and `ros_points.py` hit the same wall and scope to skill positions
-for the same reason. Both current leagues start all four (`qb_slots`, `rb_slots`, `wr_slots`,
-`te_slots` are each >= 1 for both), so within what's computable, every position either league starts
-does get a row.
+The obvious reading of "every position the league starts" would reach for `league_settings`' K,
+P and DST slots too. None of the three is a fit:
+
+- **K**: `league_settings` carries no scoring coefficients for kicking at all (`league_points`
+  only ever multiplies pass/rush/rec/fumble stats), so a kicker's row would always be a fabricated
+  zero rather than an absence.
+- **DST**: a team-level fact with no `weekly_stats` rows to aggregate — there is no "player" on
+  defense here to sum.
+- **P**: `weekly_stats` does carry punter rows, and ESPN starts one (`p_slots`), but scoring it
+  needs `punters.py`'s own punt-specific coefficients (`league_settings`' `punt_*` columns), a
+  different scoring path from `league_scoring.league_points` — exactly the "second scoring path"
+  this table's own design point says to avoid building. It's also a different question: `punters.py`
+  finds punt volume "a property of a bad offense, not of the man kicking" — a punter's production is
+  driven by his own team's field position and possession patterns, not by the competence of whichever
+  defense he's punting away from, so "defense vs. punter" doesn't ask the same thing "defense vs.
+  position" asks for the four skill positions.
+
+`points_over_replacement.py` and `ros_points.py` hit the K/DST wall and scope to skill positions for
+the same reason. Both current leagues start all four (`qb_slots`, `rb_slots`, `wr_slots`, `te_slots`
+are each >= 1 for both), so within what's computable, every position either league starts does get a
+row.
 
 ## As-of-week semantics: walk the actual games, not the calendar weeks
 
@@ -35,17 +47,24 @@ later. A bye week needs no special handling: it simply produces no row for that 
 the shift walks over it to the team's actual next game, not an empty calendar slot.
 
 A defense/position's first game of a season has no prior game to report a fact from — `games_
-observed` is 0 and every walk-forward figure is null — so that opening row is dropped from the
-table entirely rather than stored as a fact with nothing behind it. Every season-to-date figure that
-does ship therefore rests on at least one game (games_observed >= 1), and the earliest weeks are
-still thin by construction: a consumer reads `games_observed` and decides whether to trust them.
+observed` is 0 and every walk-forward figure is null — but that row still ships, rather than being
+dropped, because the row for a game that was actually played and a bye week must stay
+distinguishable: a bye week produces no row at all (there's no game to attach a fact to), and
+silently dropping the season-opening row too would make the two indistinguishable to a consumer
+doing a plain join. The ticket's own instruction is to expose the count and "leave the shrinkage to
+#114 to justify" — a table that already discarded the zero-evidence rows would have made that call
+for it.
 
 ## Rank direction, made explicit because either reading is defensible
 
 `rank` 1 is the defense that has allowed the *most* points to a position — the softest matchup, the
 one a matchup-conscious lineup call wants to know about — not the stingiest. `vs_league_avg_ratio`
 and `vs_league_avg_zscore` follow the same sign: above 1.0 / positive means this defense has allowed
-more than the league's own average to this position, as of the same week.
+more than the league's own average to this position, as of the same week. All three, plus `rank`
+itself, are null wherever `points_allowed_per_game_season_to_date` is null (no prior game, e.g. every
+defense/position's season opener) — a group with fewer than two defenses holding a real figure that
+week also nulls `vs_league_avg_zscore` on its own (`std` of one value is undefined), which is the
+correct "no comparison exists yet" answer, not a bug to guard against.
 
 ## Left out on purpose
 
@@ -157,8 +176,7 @@ def build_defense_vs_position() -> None:
         walked["league_key"] = league["league_key"]
         frames.append(walked)
 
-    combined = _relative_to_league(pd.concat(frames, ignore_index=True))
-    result = combined[combined["games_observed"] > 0][_OUTPUT_COLUMNS]
+    result = _relative_to_league(pd.concat(frames, ignore_index=True))[_OUTPUT_COLUMNS]
 
     con.execute("CREATE OR REPLACE TABLE defense_vs_position AS SELECT * FROM result")
     (count,) = con.execute("SELECT COUNT(*) FROM defense_vs_position").fetchone()
