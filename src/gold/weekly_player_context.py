@@ -201,28 +201,7 @@ ranked AS (
     FROM with_outcome
 )
 SELECT
-    ranked.league_key, ranked.season, ranked.week, ranked.player_id, ranked.player_name,
-    ranked.position, ranked.team, ranked.scoring,
-    ranked.sleeper_points, ranked.espn_points, ranked.fantasypros_rank_ecr,
-    ranked.fantasypros_pos_rank, ranked.num_sources, ranked.points_gap, ranked.points_gap_pct,
-    ranked.game_opponent, ranked.game_kickoff, ranked.game_implied_team_total,
-    ranked.game_gamescript_lean, ranked.game_roof, ranked.game_temp, ranked.game_wind,
-    ranked.dvp_points_allowed_per_game_season_to_date, ranked.dvp_points_allowed_per_game_last3,
-    ranked.dvp_points_allowed_per_game_last5, ranked.dvp_games_observed,
-    ranked.dvp_league_avg_points_allowed, ranked.dvp_vs_league_avg_ratio,
-    ranked.dvp_vs_league_avg_zscore, ranked.dvp_rank,
-    ranked.role_games_observed,
-    ranked.role_snap_share, ranked.role_snap_share_delta,
-    ranked.role_target_share, ranked.role_target_share_delta,
-    ranked.role_air_yards_share, ranked.role_air_yards_share_delta,
-    ranked.role_wopr, ranked.role_wopr_delta,
-    ranked.role_carries_share, ranked.role_carries_share_delta,
-    ranked.role_depth_rank, ranked.role_depth_rank_delta,
-    ranked.role_is_starter, ranked.role_is_starter_delta,
-    ranked.outcome_games_observed, ranked.outcome_median, ranked.outcome_floor,
-    ranked.outcome_ceiling, ranked.outcome_ceiling_rate, ranked.outcome_floor_rate,
-    ranked.outcome_position_ceiling_threshold, ranked.outcome_position_floor_threshold,
-    ranked.weekly_position_rank,
+    ranked.*,
     CASE WHEN ranked.weekly_position_rank IS NOT NULL THEN
         CAST(CEIL(ranked.weekly_position_rank * 1.0 / ls.team_count) AS BIGINT)
     END AS weekly_position_tier
