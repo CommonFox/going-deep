@@ -74,7 +74,56 @@ metric intact.
 - Route participation, snap-weighted target rate, or anything needing charting data this warehouse
   doesn't hold — out of scope per the ticket.
 - Predicting anything. This table describes what has already happened; whether it predicts next
-  week, and how many weeks of movement it takes, is #134's question to answer against this table.
+  week, and how many weeks of movement it takes, was #134's question to answer against this table.
+  #134 answers it below; nothing here changed as a result.
+
+## Verdict (#134): no rule is supportable, and the drop logic must not gate on this
+
+Run through `weekly_backtest.score_signal` (#131) against 2015-2025, plus a notebook-local scorer
+decoupling the outcome from the baseline for the next-game and rest-of-season checks
+(`notebooks/role_trend.ipynb`).
+
+**Level** (this week's own snap/target/air-yards share, WOPR, depth rank, starter flag) clears
+significance hugely against both walk-forward baselines — WR/TE `air_yards_share`, `target_share`
+and `wopr` incremental rho 0.20-0.26, p < 1e-55. That is not evidence of forecasting value: a level
+column is drawn from the *same game* as the points it's being scored against, so it's close to
+tautological (targets and air yards are the mechanism receiving points come from, not a leading
+indicator of them). Rerun against the player's own **next** game instead of the same one, the effect
+either vanishes or flips slightly negative for every metric (`target_share` -0.038, `wopr` -0.041,
+`is_starter` -0.082, all p < 1e-15; `carries_share` flat). Level is display context, not signal.
+
+**Direction** (each metric's `_delta`, the real question) is unstable in a specific, diagnosable way
+rather than merely noisy: positive against the slow `season_to_date_ppg` baseline at every window
+from 1 to 6 games (e.g. `target_share_delta` +0.03 to +0.04, p < 1e-8), but negative against the
+fast `last3_ppg` baseline at every one of those same windows (-0.06 to -0.21, p < 1e-18) — the
+reversal peaks in magnitude exactly at the shipped 3-game window, because `last3_ppg`'s own baseline
+window is also 3 games. `target_share_delta` itself correlates at rho 0.46 with `last3_ppg -
+season_to_date_ppg`: a rising role over the last 3 games is largely restating a `last3_ppg` a
+manager would already see from the last three box scores, and once that's held fixed the leftover
+correlates negatively — mean reversion, not a persisting edge. The same flip replicates on the ESPN
+league's own scoring to within 0.01 of Spearman rho, so it isn't a scoring-basis artifact.
+
+Re-run against **rest-of-season** points instead of next week, the flip doesn't shrink — it grows
+(`target_share_delta` last3-relative incremental rho -0.21 rest-of-season vs. -0.15 next-week, RB
+-0.19). A recent role spike doesn't just fail to persist; the signature is if anything *worse* to
+chase over a longer horizon.
+
+**No window (1-6 games) and no metric among the seven clears both baselines with the same sign,** so
+no "N straight weeks of decline is worth acting on" rule is supportable — the sign itself depends on
+which recent-form baseline the question is asked against. `depth_rank`/`is_starter` add nothing new:
+both weak and short on sample (depth-chart coverage caps `depth_rank` at ~4-5k rows, 14-17 weeks).
+`sleeper_points` — the literal vendor weekly projection, the one baseline not itself built from recent
+role or recent scoring — stays completely untestable: zero player-weeks in this warehouse have both a
+`weekly_stats` row and a `weekly_projections` row (#117's 2026 gap). That is the one comparison that
+could still show something different; re-run once that archive accumulates.
+
+**What #110 may and may not rely on**: may not gate a drop on any `player_role_trend` delta column,
+at any window, as an independent signal beyond a player's own recent scoring — the direction flips
+sign depending on which recent-form baseline it's read against, and the flip gets larger, not
+smaller, at a rest-of-season horizon. May display level and delta as context (what's actually
+happened), the same status `game_environment.py`'s and `defense_vs_position.py`'s verdicts landed
+on. May not treat this as settled for a projection-relative bar — that specific comparison remains
+unanswered, not negative, pending #117's archive.
 """
 
 from pathlib import Path
