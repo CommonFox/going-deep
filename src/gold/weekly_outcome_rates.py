@@ -94,6 +94,17 @@ _OUTPUT_COLUMNS = [
     "ceiling_rate", "floor_rate", "position_ceiling_threshold", "position_floor_threshold",
 ]
 
+# The player's own outcome quantile band, alongside `ceiling_rate`/`floor_rate` above — kept as one
+# dict and looped rather than three near-identical lines, the same shape
+# `defense_vs_position._RECENCY_WINDOWS` is looped for its own recency windows.
+_QUANTILE_BAND = {"median": 0.5, "floor": 0.1, "ceiling": 0.9}
+
+
+def _as_of_week_indicator(cleared: pd.Series, threshold: pd.Series) -> np.ndarray:
+    """A 0.0/1.0/null indicator for one game against its own as-of-week threshold — null wherever
+    the threshold itself hadn't formed yet, rather than treating a still-forming pool as a miss."""
+    return np.where(threshold.notna(), cleared.astype(float), np.nan)
+
 
 def _score_games(stats: pd.DataFrame, league: pd.Series) -> pd.DataFrame:
     """Each `weekly_stats` row scored under one league's own coefficients.
@@ -114,6 +125,12 @@ def _position_thresholds(scored: pd.DataFrame, ceiling_pct: float, floor_pct: fl
     pool yet. The pool spans every player at the position regardless of team, and never crosses a
     season boundary, the same reset `defense_vs_position._walk_forward` applies to its own
     per-defense series.
+
+    A plain Python loop rather than `defense_vs_position`/`player_role_trend`'s vectorized
+    `groupby(...).transform(shift/expanding)`: those walk one series per entity forward against
+    itself. This threshold is a single population — every player at the position that week — walked
+    forward against *all* of them at once, which `expanding()` has no way to express; the loop's
+    `pool` is that population, growing one week at a time.
     """
     rows = []
     for (season, position), group in scored.groupby(["season", "position"]):
@@ -149,22 +166,19 @@ def _walk_forward_player(scored: pd.DataFrame) -> pd.DataFrame:
     """
     out = scored.sort_values(["player_id", "season", "week"]).reset_index(drop=True)
 
-    has_ceiling = out["position_ceiling_threshold"].notna()
-    has_floor = out["position_floor_threshold"].notna()
-    out["_cleared_ceiling"] = np.where(
-        has_ceiling, (out["points"] >= out["position_ceiling_threshold"]).astype(float), np.nan
+    out["_cleared_ceiling"] = _as_of_week_indicator(
+        out["points"] >= out["position_ceiling_threshold"], out["position_ceiling_threshold"]
     )
-    out["_under_floor"] = np.where(
-        has_floor, (out["points"] <= out["position_floor_threshold"]).astype(float), np.nan
+    out["_under_floor"] = _as_of_week_indicator(
+        out["points"] <= out["position_floor_threshold"], out["position_floor_threshold"]
     )
 
     groups = out.groupby(["player_id", "season"])
     out["games_observed"] = groups["week"].transform(lambda w: w.shift(1).expanding().count())
     out["ceiling_rate"] = groups["_cleared_ceiling"].transform(lambda s: s.shift(1).expanding().mean())
     out["floor_rate"] = groups["_under_floor"].transform(lambda s: s.shift(1).expanding().mean())
-    out["median"] = groups["points"].transform(lambda s: s.shift(1).expanding().quantile(0.5))
-    out["floor"] = groups["points"].transform(lambda s: s.shift(1).expanding().quantile(0.1))
-    out["ceiling"] = groups["points"].transform(lambda s: s.shift(1).expanding().quantile(0.9))
+    for name, q in _QUANTILE_BAND.items():
+        out[name] = groups["points"].transform(lambda s, q=q: s.shift(1).expanding().quantile(q))
 
     return out.drop(columns=["_cleared_ceiling", "_under_floor"])
 
