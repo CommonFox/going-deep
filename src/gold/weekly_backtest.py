@@ -85,7 +85,7 @@ def _score_group(group: pd.DataFrame, baseline_col: str) -> dict:
     significance test below runs on.
     """
     weekly = []
-    for _, week_group in group.groupby("week"):
+    for _, week_group in group.groupby(["season", "week"]):
         if len(week_group) < _MIN_WEEK_ROWS:
             continue
         week_residual = week_group["actual_points"] - week_group[baseline_col]

@@ -22,6 +22,8 @@ Full test list (see the PR body for the same list with rationale):
 10. A row with enough clustered weeks also reports a 95% confidence interval on the same clustered
     effect the t-test judges, bracketing it and ordered low <= high
 11. Every row of the output carries `n` and `n_weeks`, whatever their values
+12. Clustering is by (season, week), not week number alone: week 2 of one season and week 2 of
+    another are different clusters, not one pooled together
 
 Every fixture is a small hand-built DataFrame — no warehouse — since these are exactly the kind of
 "deliberately-leaked" and "deliberately-null" constructions the ticket calls for as ground truth
@@ -280,3 +282,36 @@ def test_every_row_reports_n_and_n_weeks():
     assert out["n"].notna().all()
     assert out["n_weeks"].notna().all()
     assert (out["n"] > 0).all()
+
+
+# 12. Two different seasons that happen to share week numbers (every real multi-season sample does)
+#     must cluster as separate weeks, not merge into one group keyed on the week number alone — the
+#     whole point of clustering is that week 2 of 2023's games share nothing with week 2 of 2024's.
+def test_clustering_is_by_season_and_week_not_week_number_alone():
+    rng = np.random.default_rng(11)
+    player_ids = [f"p{i}" for i in range(10)]
+    rows, projection_rows = [], []
+    for season in (2023, 2024):
+        base_ppg = {player_id: rng.uniform(8.0, 16.0) for player_id in player_ids}
+        for week in range(1, 6):
+            for player_id in player_ids:
+                actual = max(0.0, base_ppg[player_id] + rng.normal(0.0, 3.0))
+                rows.append((player_id, season, week, "RB", actual))
+                projection_rows.append(
+                    (player_id, season, week, base_ppg[player_id] + rng.normal(0.0, 3.0))
+                )
+    actuals = _actuals(rows)
+    projection = pd.DataFrame(
+        projection_rows, columns=["player_id", "season", "week", "sleeper_points"]
+    )
+    signal = actuals[["player_id", "season", "week"]].copy()
+    signal["signal_value"] = actuals["actual_points"]
+
+    out = score_signal(signal, actuals, projection)
+    row = out[(out["position"] == "ALL") & (out["baseline"] == "season_to_date_ppg")].iloc[0]
+
+    # Week 1 of each season has no season_to_date_ppg, leaving 4 eligible weeks per season across
+    # 2 seasons = 8 distinct (season, week) clusters of 10 rows each — not 4 clusters of 20 rows,
+    # which is what grouping on week number alone would produce.
+    assert row["n_weeks"] == 8
+    assert row["n"] == 80

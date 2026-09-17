@@ -72,6 +72,33 @@ Adjusting for the strength of the offenses a defense has actually faced, and any
 thin early-season rows toward a league mean, are both explicitly out of scope per the ticket: they
 are modelling decisions that should follow #114 establishing the raw signal has value at all, not
 be baked into the table it would measure.
+
+## Verdict (#132): display-only
+
+Run through `weekly_backtest.score_signal` against 2015-2025 (`notebooks/defense_matchup.ipynb`),
+holding fixed a player's own walk-forward season-to-date and last-3 PPG. The pooled "ALL" row reads
+as flat and insignificant in both leagues (incremental rho -0.001 to -0.006, p > 0.14) — but that
+pooled row is an artifact of mixing positions with very different scoring scales, not the finding.
+Split by position, the effect
+is small but real and clears significance comfortably at every one of the four measurable positions
+(n in the tens of thousands, clustered by 181 distinct season-weeks): incremental Spearman rho of
+0.088 (QB), 0.064 (RB), 0.040 (TE) and 0.030 (WR), each p < 0.0005, each confirmed to within 0.002
+by re-running the identical measurement on the ESPN league's own scoring. That ordering — QB and RB
+carrying more signal than TE, WR least of all — runs against the common claim that matchup effects
+are largest for TE (DST isn't a computable row here at all; see "Scoped to skill positions" above).
+
+No `games_observed` suppression threshold is supported: a disjoint-bucket read (1-2 / 3-5 / 6-9 /
+10-16 games) looks like a ramp-up, but that's bucket noise — re-run as a cumulative
+`games_observed >= k` population (what a manager mid-season actually has), the effect is already at
+essentially full strength from `k = 0`, the lowest a non-null row can be, and doesn't grow further
+with more history. Whether a narrower window (last-3, last-5) beats the season-to-date figure was
+also tested — it doesn't; season-to-date matches or leads either recency window for every position.
+
+This stays *display*, not *weighted*: the actual promotion bar this epic sets is beating the
+vendor's own weekly projection, and that question is currently unanswerable — this warehouse holds
+zero player-weeks where both a completed game's actual points and a Sleeper weekly projection exist
+at once (`weekly_stats` has no 2026 rows yet; #117). Re-run the "beyond the projection" question once
+that archive accumulates.
 """
 
 from pathlib import Path
