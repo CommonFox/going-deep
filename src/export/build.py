@@ -54,6 +54,8 @@ def build_export() -> None:
 
     for table, sort_by in _TABLE_SORT_BY.items():
         frame = q(f"SELECT * FROM {table}")
+        table_rows = 0
+        file_count = 0
         for (league_key, season, week), group in partition_by_key(frame, _KEY_COLUMNS).items():
             rows = to_json_rows(group, sort_by)
             path = EXPORT_PATH / table / league_key / f"{season}-{week}.json"
@@ -62,6 +64,13 @@ def build_export() -> None:
             available.append({
                 "table": table, "league_key": league_key, "season": season, "week": week,
             })
+            table_rows += len(rows)
+            file_count += 1
+        # One always-shown line per table, same guarantee every silver/gold step gets — the
+        # per-file console.archived calls above are exactly the archive chatter GOING_DEEP_QUIET
+        # is documented to suppress, so without this line a quiet build would print nothing at
+        # all for a table this step wrote.
+        console.table(table, table_rows, detail=f"across {file_count} files")
 
     manifest = build_manifest(
         available, SCHEMA_VERSION, datetime.now(UTC).isoformat(timespec="seconds"),
@@ -69,6 +78,7 @@ def build_export() -> None:
     manifest_path = EXPORT_PATH / "manifest.json"
     _write_json(manifest_path, manifest)
     console.archived(manifest_path, len(available))
+    console.table("export_manifest", len(available))
 
 
 if __name__ == "__main__":
