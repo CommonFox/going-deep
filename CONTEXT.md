@@ -63,8 +63,34 @@ fact about a draft room rather than about a player
 **Role**:
 How much a player would be used if fit — starter, committee back, backup. Already priced into every
 external projection through its per-game term, which is why it must not be counted again as
-availability.
-_Avoid_: usage, opportunity, snap share
+availability. Assessed both as a snapshot and as a **role trend**: the week-to-week direction of its
+underlying components — snap share, target share, air-yards share, WOPR, share of team carries,
+depth-chart rank, starter flag — read as a rolling window against season-to-date, one delta per
+metric rather than collapsed into a single "trending up" score, because a receiver whose snaps are
+flat and targets are falling is a different player from one whose snaps are falling too.
+_Avoid_: usage, opportunity, snap share (as synonyms for role itself — they remain the individual
+evidence a role trend is built from); trend score, momentum (collapsing the per-metric deltas into
+one number erases exactly the distinction the trend exists to preserve)
+
+**Floor** / **Ceiling**:
+A player's own pessimistic/optimistic quantile of expected output — the 10th/90th percentile of his
+scoring distribution around a projection. Exists at season grain today (`inhouse_projections`'
+`ppg_p10`/`ppg_p90` and `projected_points_floor`/`_ceiling`, `consensus.py`'s median/floor/ceiling
+projections) and, from the weekly outcome distribution on, at weekly grain too — the same meaning,
+whether fit by a model or read directly from a player's own game log. A fact about the player's own
+distribution, never a threshold applied against his position as a whole; that is **ceiling rate** /
+**floor rate**.
+_Avoid_: upside, downside (informal, not the specific quantile), range, band (spent — see **Band**)
+
+**Ceiling rate** / **Floor rate**:
+How often a player's actual weekly score cleared a positional ceiling, or fell under a positional
+floor — a fact about the player relative to his position's population that week, not about his own
+distribution the way **Floor**/**Ceiling** are. The threshold itself is derived per (league, season,
+position) from that position's own weekly scoring distribution, never hardcoded — a fixed "20
+points" is a full-PPR running back's convention, and it is wrong for every other position and every
+other scoring basis.
+_Avoid_: boom rate, bust rate (both collide with `boom_bust.py`'s season-scale, draft-price-relative
+outcome buckets, which is the reason this pair of terms exists instead)
 
 ### Drafting
 
@@ -148,3 +174,32 @@ values themselves are untouched — a starting kicker really does clear replacem
 hold is a claim about when to ask, not about what he is worth.
 _Avoid_: streaming position, low-value position, non-skill position (all three are claims about
 value, and the value is not what is in dispute)
+
+### Weekly context
+
+**Projection**:
+A player's expected points for an entire season — the default meaning of "projection" everywhere in
+this warehouse unless qualified otherwise (`consensus_projections`, `inhouse_projections`,
+`draft_board`). Contrast **Weekly projection**.
+_Avoid_: forecast, estimate (both used loosely for either grain — say which one)
+
+**Weekly projection**:
+A player's expected points for a single week: the axis `weekly_projections` and the entire in-season
+roadmap turn on. Not a slice of a **projection** — it is sourced and computed separately (Sleeper's
+and FantasyPros' own weekly numbers), and the two grains are never blended into each other.
+_Avoid_: projection alone, when the grain matters and isn't already clear from context
+
+**Matchup**:
+The head-to-head pairing between two fantasy rosters in a given week, exactly as Sleeper and ESPN
+mean it (`sleeper_matchups`, `espn_matchups`) and as `src/gameday/storylines.py` is built around it —
+"which matchups are still in question," grouped by `matchup_id`. Reserved for that pairing alone.
+_Avoid_: using this word for **defense vs. position** — a real defense's effectiveness against a
+position is a different concept, and this entry exists specifically to stop the drift onto it
+
+**Defense vs. position**:
+How a defense has actually performed against a position, as of a given week — points allowed per
+game relative to league average, scored under each league's own coefficients, with a season-to-date
+figure and a recency-windowed figure kept apart rather than blended. An empirical fact about what
+has happened, not a prediction of what will.
+_Avoid_: matchup (already spent — see **Matchup**); DvP is fine as shorthand in code or comments,
+but is not the term of record here
