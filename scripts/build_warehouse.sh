@@ -109,6 +109,13 @@ run src.gold.ros_points
 run src.gold.waiver_rankings
 run src.gold.optimal_lineup
 
+# Sixth tier — weekly_player_context (#124) joins together every table the in-season epic (#108)
+# built: game_environment, defense_vs_position, player_role_trend and weekly_outcome_rates from
+# the second tier, league_settings from the first, plus draft_board and weekly_projections from
+# the fifth. It runs last among the gold tables because it is a pure join over all of them and has
+# nothing downstream in gold itself.
+run src.gold.weekly_player_context
+
 echo "── export ────────────────────────────────────────────────"
 # Reads the warehouse this build just finished writing and writes the JSON the SPA (#111) fetches
 # statically. Runs last among the data-producing steps so the export can never drift from a
