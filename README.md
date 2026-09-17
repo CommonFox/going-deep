@@ -387,6 +387,131 @@ network access of their own.
   needs the full eight seasons to clear t=2. The RB prime edge is a strong full-sample finding that
   was not prospectively detectable at the sample sizes available.
 
+- `src/gold/league_scoring.py` — not a table: `league_points`, the shared stat-to-points arithmetic
+  every module that rescores `weekly_stats` under a league's own coefficients (`defense_vs_position`,
+  `weekly_outcome_rates`, `ros_points`, `waiver_rankings`) imports rather than reimplements, so the
+  mapping from a counting stat to a `league_settings` column is defined exactly once.
+- `src/gold/seasons.py` — not a table: `completed_seasons`/`COMPLETED_SEASONS_SQL`, the shared
+  predicate for whether a season in the warehouse has actually finished (every regular-season game in
+  `schedules` has a `result`), since the record-of-play feeds fetch through the season in progress and
+  a season simply appearing in `weekly_stats` no longer implies it's over. Every gold model that
+  assumes a full season filters through this rather than trusting fetch scope.
+- `src/gold/depth_charts.py` — builds `player_depth_chart`: one row per (player, season, week)
+  reconciling nflverse's two incompatible depth-chart eras (a coarse first/second/third string through
+  2024, a fine positional ordinal from 2025) into the one column both eras genuinely support,
+  `is_starter`, plus each era's own native column (`string_team`/`depth_rank`) left NULL outside its
+  own era rather than faked into one blended rank.
+- `src/gold/defense_vs_position.py` — builds `defense_vs_position`: how a defense has actually
+  performed against a position, per league, as of a given week, in three recency windows
+  (season-to-date, last-3, last-5). **Verdict (#132):** display-only — the effect is small but real
+  and clears significance at every skill position (QB > RB > TE > WR, against the common TE-heaviest
+  claim), confirmed across both leagues, but the epic's actual promotion bar (beating the vendor's own
+  weekly projection) remains unanswerable pending the 2026 archive; see `notebooks/verdicts.ipynb`.
+- `src/gold/game_environment.py` — builds `game_environment`: one row per (season, week, team)
+  describing implied scoring environment (`implied_team_total`, `implied_margin`, `gamescript_lean`)
+  and kickoff conditions (`roof`/`temp`/`wind`), derived entirely from `schedules`' betting lines and
+  weather. **Verdict (#133):** display-only — `implied_margin`/`gamescript_lean` predicts for RB/TE
+  (confirming half the "RB on favorites, WR on underdogs" folk model, not the WR half), `wind` and
+  roof shelter predict for QB/WR (the deep-passing half of the wind claim), `implied_team_total` and
+  raw `temp` don't survive a baseline swap; same unanswerable promotion bar as #132.
+- `src/gold/player_role_trend.py` — builds `player_role_trend`: one row per (player, season, week)
+  tracking seven role components (snap/target/air-yards/carries share, WOPR, depth rank, starter
+  status) as both a level and a `_delta` trend, walk-forward from strictly prior games. **Verdict
+  (#134):** level is tautological (drawn from the same game as the points it's scored against, and the
+  effect vanishes against the player's own next game); direction flips sign depending on which
+  recent-form baseline holds it fixed, at every window from 1-6 games, so no "N weeks of decline" rule
+  is supportable — the one verdict here that's negative independent of the promotion-bar question.
+- `src/gold/weekly_backtest.py` — not a table: `score_signal` (#131), the harness every weekly-signal
+  measurement ticket (#132/#133/#134) and `notebooks/verdicts.ipynb` (#135) runs through. Scores a
+  signal against three baselines a manager already has (season-to-date PPG, last-3 PPG, the vendor's
+  own weekly projection) as an *incremental* correlation — holding each baseline fixed, clustered by
+  `(season, week)` rather than pooled, since a signal can track weekly scoring strongly and add nothing
+  once a baseline has already priced it in.
+- `src/gold/weekly_outcome_rates.py` — builds `weekly_outcome_rates`: how wide a player's weekly
+  scoring distribution actually is, per (league, player, season, week) — `ceiling_rate`/`floor_rate`
+  (how often he clears or misses his position's own as-of-week threshold) and his own empirical
+  `median`/`floor`/`ceiling`, the weekly-grain sibling of `inhouse_projections`' `ppg_p10`/`ppg_p90`.
+- `src/gold/weekly_projections.py` — builds `weekly_projections`: one row per (player, season, week,
+  scoring) with a single week's expected points, as distinct from every season-total projection table
+  above. Carries Sleeper's own weekly points and FantasyPros' weekly consensus rank side by side,
+  never blended into one number — the two aren't the same unit, one is points and the other a rank.
+- `src/gold/weekly_player_context.py` — builds `weekly_player_context` (#124): one row per (league,
+  season, week, player), joining `weekly_projections`, `game_environment`, `defense_vs_position`,
+  `player_role_trend` and `weekly_outcome_rates` flat and unblended — every column keeps its source
+  table's name, prefixed (`game_`/`dvp_`/`role_`/`outcome_`), and nothing here is weighted or scored,
+  so #114 can promote an input later as a change to a consumer rather than a rebuild of this table.
+- `src/gold/sleeper_ids.py` / `src/gold/espn_ids.py` — not tables: `resolve_sleeper_ids`/the ESPN
+  counterpart, each resolving every `draft_board` row to the player identifier a live draft pick will
+  actually arrive carrying, through the nflverse `ids` crosswalk rather than each platform's own
+  unreliable ID field (Sleeper's own `gsis_id` field matches 15% of the board), reporting rather than
+  guessing at whatever it can't map.
+- `src/gold/draft_board.py` — builds `draft_board`: prices every draftable player for an upcoming
+  draft, in one league's scoring and roster slots, off projections rather than `points_over_
+  replacement`'s completed-season actuals. Ranks on `projected_points_adjusted` — the health-neutral
+  blend scaled by each player's own injury-shrunk availability — since every external source projects
+  a full healthy season and discounts for role, not injury risk, the way CBS's per-game number shows.
+- `src/gold/draft_plan.py` — builds `draft_availability` and `draft_plans`: from one draft seat, the
+  probability each player survives to each upcoming pick (a skew-adjusted normal around FFC's ADP/
+  ADP-stdev, clipped to the observed range) and what each opening plan is worth. Computed per (slot,
+  pick) rather than per player, because a snake draft gives every seat a genuinely different shape —
+  the 1.01 gets one pick and then seven back-to-back pairs, not a steady drip.
+- `src/gold/ros_points.py` — builds `ros_points`: each player's season projection minus what he's
+  already scored, `projected_points_adjusted - points_already_scored`, cut off at whichever week has
+  actually been played. The number a waiver add is actually judged on — a 150-point projection with
+  140 already scored is a very different pickup from the same projection with 10 scored.
+- `src/gold/target_earning.py` — builds `target_earning` (#67): projects next season's WR target
+  share from what causes it (prior target/air-yards share, blended by what each alone predicts best,
+  plus this year's depth-chart role) rather than carrying the raw share forward, which is close to
+  tautological — 9 targets/game already is a WR1 workload, so the heuristic mostly restates itself.
+- `src/gold/free_agents.py` — builds `free_agents`: every player rostered by no team, per league —
+  Sleeper resolved as a set difference (no ownership flag exists), ESPN off a direct status flag that
+  keeps `WAIVERS` (just dropped, claimable but not addable outright) distinguishable from `FREEAGENT`.
+- `src/gold/my_roster.py` — builds `my_roster` (#88): the configured owner's actual roster, per
+  league, resolved from already-loaded identity tables between drafts — unlike `src/draft/seat.py`'s
+  live version of the same question, nothing here changes between one warehouse rebuild and the next,
+  so this reads what a build already has on disk rather than polling either platform.
+- `src/gold/lineup_fill.py` — not a table: `fill_lineup` (#87), the generalized greedy slot-filler
+  extracted from `draft_strategy.py`'s lineup scorer so the lineup optimizer doesn't duplicate it —
+  fills the narrowest eligibility first, since superflex eligibility is a strict superset of flex,
+  which is itself a superset of a dedicated slot, the same proof `draft_strategy.py` already made.
+- `src/gold/optimal_lineup.py` — builds `optimal_lineup` and `optimal_lineup_bench` (#89): combines
+  `my_roster`, `weekly_projections` and `fill_lineup` into one starting lineup per (league, week). A
+  rostered player missing a week's projection is reported with a null `projected_points`, never
+  zeroed, so `fill_lineup` can still correctly bench him without the gap reading as "no signal".
+- `src/gold/waiver_rankings.py` — builds `waiver_rankings` (#83): one row per (league, week,
+  available player) carrying both this week's points and rest-of-season points, kept visibly distinct
+  rather than blended into one waiver score, so "who helps me this week" and "who helps me the rest of
+  the season" stay separately answerable from the free-agent pool.
+
+## Web app (`src/web/`)
+
+A [Streamlit](https://streamlit.io/) app, run with `streamlit run src/web/app.py`, reading the
+warehouse read-only exactly the way notebooks do — through `src.query.q()`, never a held-open
+`duckdb.connect()`, since a connection kept alive across a `streamlit run` session takes the same
+file lock that would make `scripts/build_warehouse.sh` fail with an error that never mentions this
+app. It computes and writes nothing back to the warehouse; every page is a read over a table one of
+the pipelines above already built.
+
+- `src/web/app.py` — the entry point. Pure scaffolding: it shows a "warehouse built at" caption and a
+  staleness warning in the sidebar (via `warehouse_status.py`) on every page, then hands off to
+  whichever page under `pages/` was picked, discovered at runtime — adding a page is a new file, not
+  a change to this one.
+- `src/web/warehouse_status.py` — `warehouse_built_at`/`staleness_warning`: how current the warehouse
+  is, read off the file's own mtime rather than a table. A day old is the default staleness threshold
+  (waiver claims and lineup calls both turn on injury/role news that can land any hour); a warning
+  banner rather than `src/draft/live.py`'s hard stop, since nothing here is as irreversible as a bad
+  draft pick.
+- `src/web/pages/home.py` — landing page; a pointer to the other pages, nothing else.
+- `src/web/pages/waiver_board.py` — the waiver board (#85, under the waiver-wire epic #78). Reads
+  `waiver_rankings` per (league, current week) and shows this-week and rest-of-season points as two
+  independently sortable columns rather than one blended score, since a bye-week fill-in and a real
+  role change can rank oppositely on the two. Surfaces on-waivers players (#104) by default, badged
+  rather than hidden, since a just-dropped name is often exactly who opened the page.
+- `src/web/pages/lineup_optimizer.py` — the lineup optimizer (#90, under the lineup-optimizer epic
+  #86). Reads `optimal_lineup`/`optimal_lineup_bench` (built by `src/gold/optimal_lineup.py`, #89)
+  and recomputes no player value itself — matching #86's own reasoning that value is fixed by the
+  warehouse rebuild, and this page only displays what that rebuild already decided.
+
 ## Environment
 
 A Python 3.11 virtualenv lives at `.venv/` (gitignored):
