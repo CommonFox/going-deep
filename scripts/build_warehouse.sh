@@ -66,10 +66,13 @@ run src.gold.my_roster
 # (player_weighted_baselines, the two grade tables, player_depth_chart, and adp_consensus as its
 # backtest benchmark); points_over_replacement needs league_settings for per-league scoring, and
 # punters needs it for the punt scoring no other league prices. defense_vs_position needs only
-# weekly_stats and league_settings, same shape as points_over_replacement.
+# weekly_stats and league_settings, same shape as points_over_replacement. player_role_trend needs
+# weekly_stats/snap_counts/ids (silver) plus player_depth_chart, so it has to run after depth_charts
+# but is otherwise independent of every other second-tier table.
 run src.gold.inhouse_projections
 run src.gold.points_over_replacement
 run src.gold.defense_vs_position
+run src.gold.player_role_trend
 run src.gold.punters
 run src.gold.punt_environment
 
