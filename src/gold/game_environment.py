@@ -47,7 +47,50 @@ a playoff-eligible fantasy week should have no game_environment row.
 
 "A team expected to trail throws more" is the intuition; this only names where `implied_margin`
 sits, the way a broadcast graphic would. Whether the bucket actually predicts anything week to week
-is #114's job, not this table's — this stays a documented transformation of the spread.
+was #114's job, not this table's — this stays a documented transformation of the spread. #133
+answers the predictive question below; nothing here changed as a result.
+
+## Verdict (#133): display-only
+
+Run through `weekly_backtest.score_signal` against 2015-2025 (`notebooks/game_environment.ipynb`),
+holding fixed a player's own walk-forward season-to-date and last-3 PPG, for the four measurable
+positions (QB/RB/WR/TE — `league_points` has no kicking coefficients, so K is not computable here
+any more than it is in `defense_vs_position.py`).
+
+**Implied margin / `gamescript_lean`** carries the strongest and most robust signal: RB (incremental
+rho 0.032 against season-to-date, 0.024 against last-3, both p < 0.01) and TE (0.021 / 0.023, both
+p < 0.04) hold up against both baselines; QB and WR are flat and insignificant on both. That confirms
+only *half* the folk "RB on favorites, WR on underdogs" model — the RB-favorite half holds, the
+WR-underdog half does not (WR incremental rho -0.006, p = 0.33). Bucketing to `gamescript_lean`
+instead of the continuous `implied_margin` loses essentially nothing (RB 0.035, TE 0.018) except a
+little of TE's significance (p = 0.066 vs. 0.028) — the named bucket is a fine proxy for the number
+it's built from.
+
+**`implied_team_total`** is weaker and baseline-fragile: RB (0.024) and WR (-0.014, the *opposite*
+sign from what "more offense helps everyone" would predict) both clear p < 0.05 against
+season-to-date PPG, but neither survives against last-3 PPG (RB p = 0.15, WR p = 0.37). Read as
+unconfirmed rather than a real effect — a finding that depends on which walk-forward baseline holds
+it fixed is exactly the kind of thing `draft_strategy.py`'s slope check and `player_archetypes.py`'s
+gate exist to catch.
+
+**`wind`** matters for QB (-0.057 / -0.057, both baselines, both p < 0.007) and WR (-0.022 / -0.025,
+both baselines, both p < 0.02) — RB and TE show no effect either way. That confirms the "wind hurts
+deep passing" half of the common claim (QB carries the largest effect of any signal measured here);
+the kicker half is uncheckable in this warehouse for the K-scoring reason above. Contrast
+`punt_environment.py`'s "doesn't order at all" weather finding — that was about punting specifically,
+not about every weather claim this warehouse could test.
+
+Every number above is confirmed to within 0.002 of Spearman rho re-running the identical measurement
+on the ESPN league's own scoring. Join coverage is 97.8% (1,383 of 61,977 skill-position player-weeks
+excluded): `weekly_stats.team` back-labels three relocated franchises (Raiders, Chargers, Rams) to
+their current city for every season, while `schedules`/this table use the abbreviation actually in
+use at the time (OAK/SD/STL, 2015-2016) — a small, understood gap, not corrected for here.
+
+This stays *display*, not *weighted*, for the same reason `defense_vs_position.py`'s #132 verdict
+does: the promotion bar is beating the vendor's own weekly projection, and that question is
+unanswerable right now — zero player-weeks in this warehouse have both a completed game's actual
+points and a Sleeper weekly projection (`weekly_stats` has no 2026 rows yet; #117). Re-run once that
+archive accumulates.
 """
 
 from pathlib import Path
