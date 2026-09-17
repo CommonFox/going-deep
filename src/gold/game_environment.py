@@ -55,34 +55,46 @@ answers the predictive question below; nothing here changed as a result.
 Run through `weekly_backtest.score_signal` against 2015-2025 (`notebooks/game_environment.ipynb`),
 holding fixed a player's own walk-forward season-to-date and last-3 PPG, for the four measurable
 positions (QB/RB/WR/TE — `league_points` has no kicking coefficients, so K is not computable here
-any more than it is in `defense_vs_position.py`).
+any more than it is in `defense_vs_position.py`). Sample sizes run from n = 3,904 (QB, wind, a dome
+game has no wind reading) to n = 22,800 (WR, every full-coverage signal), clustered by 173-181
+distinct season-weeks depending on the signal's own null rate.
 
 **Implied margin / `gamescript_lean`** carries the strongest and most robust signal: RB (incremental
-rho 0.032 against season-to-date, 0.024 against last-3, both p < 0.01) and TE (0.021 / 0.023, both
-p < 0.04) hold up against both baselines; QB and WR are flat and insignificant on both. That confirms
-only *half* the folk "RB on favorites, WR on underdogs" model — the RB-favorite half holds, the
-WR-underdog half does not (WR incremental rho -0.006, p = 0.33). Bucketing to `gamescript_lean`
-instead of the continuous `implied_margin` loses essentially nothing (RB 0.035, TE 0.018) except a
-little of TE's significance (p = 0.066 vs. 0.028) — the named bucket is a fine proxy for the number
-it's built from.
+rho 0.032, n = 14,346 / 181 weeks against season-to-date; 0.024 against last-3, both p < 0.01) and TE
+(0.021, n = 11,236 / 181 weeks; 0.023 against last-3, both p < 0.04) hold up against both baselines;
+QB and WR are flat and insignificant on both. That confirms only *half* the folk "RB on favorites, WR
+on underdogs" model — the RB-favorite half holds, the WR-underdog half does not (WR incremental rho
+-0.006, p = 0.33). Bucketing to `gamescript_lean` instead of the continuous `implied_margin` loses
+essentially nothing (RB 0.035, TE 0.018) except a little of TE's significance (p = 0.066 vs. 0.028)
+— the named bucket is a fine proxy for the number it's built from.
 
-**`implied_team_total`** is weaker and baseline-fragile: RB (0.024) and WR (-0.014, the *opposite*
-sign from what "more offense helps everyone" would predict) both clear p < 0.05 against
-season-to-date PPG, but neither survives against last-3 PPG (RB p = 0.15, WR p = 0.37). Read as
-unconfirmed rather than a real effect — a finding that depends on which walk-forward baseline holds
-it fixed is exactly the kind of thing `draft_strategy.py`'s slope check and `player_archetypes.py`'s
-gate exist to catch.
+**`implied_team_total`** and **`temp`** are both weaker and baseline-fragile, not real findings.
+`implied_team_total`: RB (0.024) and WR (-0.014, the *opposite* sign from what "more offense helps
+everyone" would predict) both clear p < 0.05 against season-to-date PPG, but neither survives against
+last-3 PPG (RB p = 0.15, WR p = 0.37). `temp`: QB looks promising at first against season-to-date
+(p = 0.08) but flips to significant on last-3 in one league (ESPN p = 0.043) and not the other
+(Sleeper p = 0.082); RB/TE/WR show nothing on either baseline. Both read as unconfirmed rather than
+real — a finding that depends on which walk-forward baseline holds it fixed, or on which league's
+scoring is used, is exactly the kind of thing `draft_strategy.py`'s slope check and
+`player_archetypes.py`'s gate exist to catch.
 
 **`wind`** matters for QB (-0.057 / -0.057, both baselines, both p < 0.007) and WR (-0.022 / -0.025,
-both baselines, both p < 0.02) — RB and TE show no effect either way. That confirms the "wind hurts
-deep passing" half of the common claim (QB carries the largest effect of any signal measured here);
-the kicker half is uncheckable in this warehouse for the K-scoring reason above. Contrast
-`punt_environment.py`'s "doesn't order at all" weather finding — that was about punting specifically,
-not about every weather claim this warehouse could test.
+both baselines, both p < 0.02) — RB and TE show no effect either way. `is_sheltered` (a closed roof
+or dome, which blocks wind and precipitation the same way) finds the mirror image for WR: +0.021
+against season-to-date (p = 0.002), +0.027 against last-3 (p = 0.0002), both significant; QB carries
+the same sign but doesn't clear significance on either baseline (p = 0.12 / 0.06). Together these
+confirm the "wind hurts deep passing" half of the common claim (QB carries the largest confirmed
+effect of any signal measured here); the kicker half is uncheckable in this warehouse for the
+K-scoring reason above. Contrast `punt_environment.py`'s "doesn't order at all" weather finding —
+that was about punting specifically, not about every weather claim this warehouse could test.
 
-Every number above is confirmed to within 0.002 of Spearman rho re-running the identical measurement
-on the ESPN league's own scoring. Join coverage is 97.8% (1,383 of 61,977 skill-position player-weeks
-excluded): `weekly_stats.team` back-labels three relocated franchises (Raiders, Chargers, Rams) to
+Every number in this verdict that held up against both walk-forward baselines — `implied_margin`'s
+RB/TE effect, `wind`'s QB/WR effect, `is_sheltered`'s WR effect — is confirmed to within 0.002 of
+Spearman rho re-running the identical measurement on the ESPN league's own scoring; the unconfirmed
+signals (`implied_team_total`, `temp`) aren't cross-league-checked, since a signal that already
+failed the single-warehouse robustness check doesn't need a second league to also fail to confirm it.
+Join coverage is 97.8% (1,383 of 61,977 skill-position player-weeks excluded): `weekly_stats.team`
+back-labels three relocated franchises (Raiders, Chargers, Rams) to
 their current city for every season, while `schedules`/this table use the abbreviation actually in
 use at the time (OAK/SD/STL, 2015-2016) — a small, understood gap, not corrected for here.
 
