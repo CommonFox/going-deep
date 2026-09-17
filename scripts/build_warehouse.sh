@@ -109,6 +109,12 @@ run src.gold.ros_points
 run src.gold.waiver_rankings
 run src.gold.optimal_lineup
 
+echo "── export ────────────────────────────────────────────────"
+# Reads the warehouse this build just finished writing and writes the JSON the SPA (#111) fetches
+# statically. Runs last among the data-producing steps so the export can never drift from a
+# gold table that hadn't landed yet.
+run src.export.build
+
 echo "── warehouse ─────────────────────────────────────────────"
 # Brief: every table was named as it was written. `python -m src.summary` lists them all.
 python -m src.summary --brief

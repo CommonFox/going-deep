@@ -32,7 +32,7 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
       alone.
   - `src/gold/<model>.py` — proprietary/derived models built on top of already-loaded silver
     tables (e.g. `consensus.py`). Pure SQL/Python over the warehouse — no fetch step, no network.
-  - `src/draft/` — the live draft assistant, and one of two parts of `src/` that are not a
+  - `src/draft/` — the live draft assistant, and one of three parts of `src/` that are not a
     medallion layer. It is neither: it reads no raw file and writes nothing at all. `src/draft/live.py`
     is the runnable edge and the only module here that touches the world — GETs to Sleeper, the
     warehouse read through `src/query.py`, which opens read-only and closes per call, and whatever
@@ -47,6 +47,15 @@ Dependencies are pinned in `requirements.txt` — keep it in sync when adding ne
     `sleeper_users`, `sleeper_players`, `sleeper_projections`); everything else is pure. New
     modules for live, in-season, read-only tools go here rather than under `draft/` (which is
     draft-day specifically) or `gold/` (warehouse-to-warehouse only).
+  - `src/export/` — the third part of `src/` that is not a medallion layer, and the only one that
+    is neither live nor network-facing: it reads no raw file, hits no network, and writes nothing
+    back to DuckDB. `src/export/build.py` is the runnable edge and the only module here that
+    touches the world — reads through `src/query.py`, writes JSON files under `data/export/` for
+    the React SPA (#111) to fetch statically. Every other module is pure: an already-queried frame
+    in, JSON-ready rows or a manifest dict out. Runs as the tail of `scripts/build_warehouse.sh`,
+    after every gold table it reads from, so the export can never drift from the warehouse that
+    produced it. A new exported view for the front end goes here; a new derived/proprietary table
+    still goes in `src/gold/` even if the SPA ends up being its only consumer.
 - `if __name__ == "__main__":` in each source module runs the full fetch→load sequence for that
   source end to end.
 - Console output goes through `src/console.py`, never a bare `print`:
