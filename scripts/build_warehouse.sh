@@ -65,9 +65,11 @@ run src.gold.my_roster
 # Second tier — inhouse_projections needs every first-tier table except league_settings
 # (player_weighted_baselines, the two grade tables, player_depth_chart, and adp_consensus as its
 # backtest benchmark); points_over_replacement needs league_settings for per-league scoring, and
-# punters needs it for the punt scoring no other league prices.
+# punters needs it for the punt scoring no other league prices. defense_vs_position needs only
+# weekly_stats and league_settings, same shape as points_over_replacement.
 run src.gold.inhouse_projections
 run src.gold.points_over_replacement
+run src.gold.defense_vs_position
 run src.gold.punters
 run src.gold.punt_environment
 
