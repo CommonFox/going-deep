@@ -10,3 +10,5 @@ data/
 .vscode/
 
 .pytest_cache/
+
+.claude/scheduled_tasks.lock
