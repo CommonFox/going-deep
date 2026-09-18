@@ -1,0 +1,71 @@
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+}
+
+.summary {
+  padding: calc(var(--space) * 3);
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: calc(var(--space) * 2);
+  color: var(--accent);
+  transition: transform 0.15s ease;
+}
+
+.panel[open] .summary::before {
+  transform: rotate(90deg);
+}
+
+.body {
+  padding: 0 calc(var(--space) * 3) calc(var(--space) * 3);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 4);
+}
+
+.sectionTitle {
+  margin: 0 0 calc(var(--space) * 2);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: calc(var(--space) * 2) calc(var(--space) * 4);
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 0.5);
+}
+
+.fieldLabel {
+  margin: 0;
+  font-size: var(--text-2xs);
+  color: var(--ink-muted);
+}
+
+.fieldValue {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.fieldValue[data-tone='good'] {
+  color: var(--good);
+}
+
+.fieldValue[data-tone='bad'] {
+  color: var(--bad);
+}
