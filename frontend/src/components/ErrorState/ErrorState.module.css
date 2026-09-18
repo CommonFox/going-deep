@@ -1,0 +1,27 @@
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--space) * 3);
+  padding: calc(var(--space) * 4);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+.retry {
+  padding: calc(var(--space) * 1) calc(var(--space) * 3);
+  background: transparent;
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.retry:hover {
+  background: color-mix(in srgb, var(--bad) 20%, transparent);
+}

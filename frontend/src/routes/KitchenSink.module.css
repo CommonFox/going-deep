@@ -1,0 +1,86 @@
+.section {
+  margin-bottom: calc(var(--space) * 10);
+}
+
+.section h2 {
+  font-size: var(--text-lg);
+  margin-bottom: calc(var(--space) * 3);
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+  margin-bottom: calc(var(--space) * 8);
+}
+
+.toggleButton {
+  padding: calc(var(--space) * 1.5) calc(var(--space) * 3);
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.swatchGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: calc(var(--space) * 3);
+}
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 1);
+  padding: calc(var(--space) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.swatchColor {
+  height: calc(var(--space) * 8);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.typeScale {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+}
+
+.tiles {
+  display: flex;
+  gap: calc(var(--space) * 3);
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  padding: calc(var(--space) * 0.5) calc(var(--space) * 2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  font-weight: 600;
+}
+
+.badgeAccent {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.badgeMuted {
+  background: color-mix(in srgb, var(--ink-muted) 15%, transparent);
+  color: var(--ink-muted);
+  border: 1px solid var(--border);
+}
+
+.stateGrid {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 4);
+}

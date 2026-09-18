@@ -1,0 +1,68 @@
+.wrapper {
+  width: 100%;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  text-align: left;
+  padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+}
+
+.table th[data-sortable='true'] {
+  cursor: pointer;
+}
+
+.cell {
+  padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+}
+
+.row:hover {
+  background: var(--bg-muted);
+}
+
+/* Below 480px: a real <table> stops being readable, so each row becomes a stacked card of
+   label:value pairs instead — pure CSS, no JS breakpoint logic, no horizontal scroll at 320px. */
+@media (max-width: 480px) {
+  .table thead {
+    display: none;
+  }
+
+  .table,
+  .table tbody,
+  .table tr {
+    display: block;
+    width: 100%;
+  }
+
+  .table tr {
+    margin-bottom: calc(var(--space) * 3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  }
+
+  .cell {
+    display: flex;
+    justify-content: space-between;
+    gap: calc(var(--space) * 3);
+    padding: calc(var(--space) * 1) 0;
+    border-bottom: none;
+  }
+
+  .cell::before {
+    content: attr(data-label);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+}

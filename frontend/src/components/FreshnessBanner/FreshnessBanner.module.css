@@ -1,0 +1,10 @@
+/* Same-hue, two-alpha chip pattern (fotmob's fixture-difficulty chips): the token itself supplies
+   the hue, color-mix() supplies the alpha, so no new color literal is ever written here. */
+.banner {
+  padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  background: color-mix(in srgb, var(--bad) 15%, transparent);
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
