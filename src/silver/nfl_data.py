@@ -250,6 +250,12 @@ def load_injuries() -> None:
     frames = []
     for path, captured_at in paths:
         df = pd.read_parquet(path)
+        # nflverse has published `date_modified` both tz-aware and tz-naive depending on when the
+        # snapshot was captured. Concatenating both as-is leaves pandas an `object` column mixing
+        # aware and naive Timestamps, which DuckDB can't convert to a single TIMESTAMP column. The
+        # naive values carry the same wall-clock time as their aware counterparts (i.e. they're
+        # already UTC, just missing the tzinfo), so localizing them here is lossless.
+        df["date_modified"] = pd.to_datetime(df["date_modified"], utc=True)
         df["captured_at"] = captured_at
         frames.append(df)
     combined = pd.concat(frames, ignore_index=True)
