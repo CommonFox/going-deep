@@ -1,0 +1,14 @@
+.caption {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  margin: calc(var(--space) * 2) 0 calc(var(--space) * 6);
+}
+
+.section {
+  margin-bottom: calc(var(--space) * 10);
+}
+
+.section h2 {
+  font-size: var(--text-lg);
+  margin-bottom: calc(var(--space) * 3);
+}

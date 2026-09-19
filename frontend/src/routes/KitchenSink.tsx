@@ -8,48 +8,16 @@ import { ErrorState } from '../components/ErrorState/ErrorState'
 import { FreshnessBannerView } from '../components/FreshnessBanner/FreshnessBanner'
 import { stalenessWarning } from '../lib/manifest'
 import { getRowKey } from '../lib/rowKey'
+import { starterColumns as optimalLineupColumns } from '../lib/lineupColumns'
 import {
   optimalLineupFixture,
   waiverRankingsFixture,
   staleFixtureManifest,
-  type OptimalLineupRow,
   type WaiverRankingRow,
 } from '../lib/fixtures'
 import styles from './KitchenSink.module.css'
 
 const TOKENS = ['bg', 'bg-muted', 'ink', 'ink-muted', 'border', 'accent', 'good', 'bad'] as const
-
-const optimalLineupColumns: Column<OptimalLineupRow>[] = [
-  { key: 'slot', header: 'Slot', accessor: (r) => r.slot },
-  {
-    key: 'player',
-    header: 'Player',
-    render: (r) =>
-      r.player_name ?? <span className="unknown">not enough eligible players</span>,
-  },
-  {
-    key: 'projected',
-    header: 'Projected',
-    sortable: true,
-    accessor: (r) => r.projected_points,
-    render: (r) =>
-      r.projected_points != null ? (
-        r.projected_points.toFixed(2)
-      ) : (
-        <span className="unknown">no projection — excluded</span>
-      ),
-  },
-  {
-    key: 'closeCall',
-    header: 'Close call',
-    render: (r) =>
-      r.is_close_call
-        ? `vs. ${r.bench_player_name} (+${(
-            (r.projected_points ?? 0) - (r.bench_projected_points ?? 0)
-          ).toFixed(2)})`
-        : '—',
-  },
-]
 
 const waiverColumns: Column<WaiverRankingRow>[] = [
   {
