@@ -9,6 +9,7 @@ checked by hand.
 import pandas as pd
 
 from src.gold.optimal_lineup import (
+    backfill_unprojected,
     bench_rows,
     flag_close_calls,
     resolve_player_ids,
@@ -36,7 +37,7 @@ def projections(*rows: dict) -> pd.DataFrame:
 
 
 def missing(*rows: dict) -> pd.DataFrame:
-    return pd.DataFrame(rows, columns=["player_name", "position"])
+    return pd.DataFrame(rows, columns=["player_id", "player_name", "position"])
 
 
 # 1. A Sleeper roster row resolves to the warehouse-wide player_id through draft_board's sleeper_id
@@ -87,7 +88,8 @@ def test_player_with_a_projection_becomes_a_candidate():
 
 
 # 5. A resolved player with no weekly_projections row this week (a bye, or a position no weekly
-#    source prices) is reported by name, not handed to fill_lineup as a 0.
+#    source prices) is reported by name, not handed to fill_lineup as a 0. His player_id is carried
+#    through too, so backfill_unprojected can still seat him if he's the only candidate for his slot.
 def test_player_with_no_projection_row_is_reported_not_zeroed():
     candidates, missing = split_by_projection(
         roster_ids({"league_key": "sleeper", "platform_player_id": "100", "player_name": "On Bye",
@@ -97,6 +99,7 @@ def test_player_with_no_projection_row_is_reported_not_zeroed():
 
     assert candidates == []
     assert missing["player_name"].tolist() == ["On Bye"]
+    assert missing["player_id"].tolist() == ["00-1111"]
 
 
 # 6. A roster row the identity crosswalk never resolved is reported the same way, by the name
@@ -110,6 +113,7 @@ def test_player_with_unresolved_id_is_reported_not_zeroed():
 
     assert candidates == []
     assert missing["player_name"].tolist() == ["Deep Bench"]
+    assert pd.isna(missing["player_id"].iloc[0])
 
 
 # 7. A starter with no bench player eligible for his slot at all is never a close call.
@@ -204,7 +208,7 @@ def test_unstarted_candidate_is_on_the_bench_with_his_points():
 #     too, with a null `projected_points` rather than vanishing or reading as a real 0.
 def test_missing_projection_player_is_on_the_bench_with_null_points():
     rows = bench_rows(
-        [], {}, missing({"player_name": "On Bye", "position": "RB"}), {},
+        [], {}, missing({"player_id": "rb9", "player_name": "On Bye", "position": "RB"}), {},
     )
 
     row = rows.iloc[0]
@@ -212,3 +216,74 @@ def test_missing_projection_player_is_on_the_bench_with_null_points():
     assert row["player_name"] == "On Bye"
     assert row["position"] == "RB"
     assert pd.isna(row["projected_points"])
+
+
+# 16. A dedicated slot fill_lineup left completely empty is seated by the one unprojected roster
+#     player at that position — the ESPN league's punter, who no weekly source ever prices.
+def test_backfill_seats_the_only_unprojected_player_at_the_position():
+    assignment = backfill_unprojected(
+        {"P1": None}, {"P": 1},
+        missing({"player_id": "punter1", "player_name": "A Punter", "position": "P"}),
+    )
+
+    assert assignment == {"P1": "punter1"}
+
+
+# 17. A slot fill_lineup already filled from a real projection is never overwritten by an
+#     unprojected player at the same position, even if one is sitting on the bench.
+def test_backfill_never_overwrites_an_already_filled_slot():
+    assignment = backfill_unprojected(
+        {"RB1": "rb1"}, {"RB": 1},
+        missing({"player_id": "rb2", "player_name": "Backup Back", "position": "RB"}),
+    )
+
+    assert assignment == {"RB1": "rb1"}
+
+
+# 18. A missing row with no resolved player_id (the identity crosswalk never caught up) can't seat
+#     anyone — there's no real identity to put in the slot.
+def test_backfill_skips_a_row_with_no_resolved_player_id():
+    assignment = backfill_unprojected(
+        {"P1": None}, {"P": 1},
+        missing({"player_id": None, "player_name": "Unresolved Punter", "position": "P"}),
+    )
+
+    assert assignment == {"P1": None}
+
+
+# 19. Backfill only ever considers positions named in `slots` (the dedicated ones) — an empty FLEX
+#     slot is never filled from an unprojected RB, since more than one position could fill FLEX and
+#     picking one would be a guess, not "there was no one else."
+def test_backfill_does_not_touch_flex_slots():
+    assignment = backfill_unprojected(
+        {"FLEX1": None}, {"RB": 0},
+        missing({"player_id": "rb1", "player_name": "A Back", "position": "RB"}),
+    )
+
+    assert assignment == {"FLEX1": None}
+
+
+# 20. Two open slots at the same position with two unprojected candidates both get filled, in
+#     deterministic (player_id) order — the same tiebreak fill_lineup itself uses.
+def test_backfill_fills_multiple_open_slots_deterministically():
+    assignment = backfill_unprojected(
+        {"P1": None, "P2": None}, {"P": 2},
+        missing(
+            {"player_id": "punter2", "player_name": "B Punter", "position": "P"},
+            {"player_id": "punter1", "player_name": "A Punter", "position": "P"},
+        ),
+    )
+
+    assert assignment == {"P1": "punter1", "P2": "punter2"}
+
+
+# 21. A missing row backfill_unprojected seated into the lineup is not also listed as an unresolved
+#     bench player — he's a starter now, not a starter *and* a bench mystery.
+def test_backfilled_starter_is_not_also_listed_as_unresolved_bench():
+    rows = bench_rows(
+        [], {"P1": "punter1"},
+        missing({"player_id": "punter1", "player_name": "A Punter", "position": "P"}),
+        {"punter1": "A Punter"},
+    )
+
+    assert rows.empty

@@ -32,6 +32,18 @@ Either way, defaulting him to 0 points would let `fill_lineup` correctly bench h
 with no row for the week is pulled out of that week's candidate pool entirely, rather than handed to
 `fill_lineup` with a fabricated score, and reported by name instead.
 
+## An empty dedicated slot is backfilled when there was never a decision to make
+
+Pulling every unprojected player out of the candidate pool is right when it leaves `fill_lineup`
+something to rank; it's wrong when it leaves a dedicated slot with *no* candidate at all, because
+that isn't a sit/start call — there's no alternative to weigh, projected or not. The ESPN league's
+punter is the standing example: every week, no source prices him, so the pool `fill_lineup` sees for
+`P` is always empty and `P1` always comes back `None`, even though a punter is rostered. Once
+`fill_lineup` has taken its pass, `backfill_unprojected` seats any dedicated slot still empty from
+the unprojected roster players at that exact position — never `FLEX`/`SUPERFLEX`, where more than
+one position could fill the slot and picking one really would be a guess. A backfilled slot keeps a
+null `projected_points` (see `flag_close_calls`) rather than inventing one.
+
 ## A close sit/start call is a fact about the bench, not just the starter
 
 For every filled slot, the best-scoring benched player still eligible for it — leftover after every
@@ -101,6 +113,10 @@ def split_by_projection(
     if it resolved to a real `player_id` *and* that `player_id` has a projection this week — either
     gap reads identically to a drafter (nothing to start him on), so both land in the same missing
     frame rather than one of them silently becoming a 0.
+
+    `missing` carries `player_id` (null where identity never resolved) alongside `player_name`/
+    `position` so `backfill_unprojected` can still seat a resolved player into a slot with no other
+    candidate, without a second pass back through the roster.
     """
     points_by_id = dict(zip(projections["player_id"], projections["sleeper_points"]))
 
@@ -109,12 +125,37 @@ def split_by_projection(
     for row in roster_ids.itertuples():
         points = points_by_id.get(row.player_id) if pd.notna(row.player_id) else None
         if points is None or pd.isna(points):
-            missing_rows.append({"player_name": row.player_name, "position": row.position})
+            missing_rows.append(
+                {"player_id": row.player_id, "player_name": row.player_name, "position": row.position}
+            )
         else:
             candidates.append((row.player_id, row.position, float(points)))
 
-    missing = pd.DataFrame(missing_rows, columns=["player_name", "position"])
+    missing = pd.DataFrame(missing_rows, columns=["player_id", "player_name", "position"])
     return candidates, missing
+
+
+def backfill_unprojected(
+    assignment: dict[str, str | None], slots: dict[str, int], missing: pd.DataFrame,
+) -> dict[str, str | None]:
+    """Seat a resolved, unprojected roster player into a dedicated slot `fill_lineup` left empty —
+    see the module docstring's "no decision to make" case. Only touches slots named in `slots`
+    (always the dedicated positions; `FLEX`/`SUPERFLEX` are never keys there), and only positions
+    already open after `fill_lineup`'s own pass, so a projected candidate always keeps priority.
+
+    Ties among multiple unprojected candidates for the same slot — no projection exists to rank them
+    on — break on `player_id`, the same deterministic tiebreak `fill_lineup` itself uses.
+    """
+    assignment = dict(assignment)
+    resolvable = missing[missing["player_id"].notna()]
+    for position, count in slots.items():
+        open_slots = [
+            f"{position}{i + 1}" for i in range(count) if assignment.get(f"{position}{i + 1}") is None
+        ]
+        fillers = resolvable.loc[resolvable["position"] == position, "player_id"].sort_values()
+        for slot, player_id in zip(open_slots, fillers):
+            assignment[slot] = player_id
+    return assignment
 
 
 def _slot_eligible_positions(slot: str) -> tuple[str, ...]:
@@ -176,6 +217,9 @@ def bench_rows(
     of a fabricated 0 — the same distinction `split_by_projection`'s docstring makes about the
     starting lineup, extended to the bench so the page can render "no projection" rather than
     silently ranking him last.
+
+    A `missing` row `backfill_unprojected` seated is excluded here too — `assignment` is the same
+    one that seats him, so he reads as a starter only, never as bench *and* starter at once.
     """
     started = {player_id for player_id in assignment.values() if player_id}
     bench = [
@@ -192,6 +236,7 @@ def bench_rows(
             "projected_points": None,
         }
         for row in missing.itertuples()
+        if row.player_id not in started
     ]
     columns = ["player_id", "player_name", "position", "projected_points"]
     return pd.DataFrame(bench + unresolved, columns=columns)
@@ -206,6 +251,7 @@ def _week_rows(
     rows that had nothing to seat them on, and the full bench (#90's page reads this third one)."""
     candidates, missing = split_by_projection(league_roster, week_projections)
     assignment, _ = fill_lineup(candidates, slots, flex, superflex)
+    assignment = backfill_unprojected(assignment, slots, missing)
     rows = flag_close_calls(assignment, candidates)
 
     names = dict(zip(league_roster["player_id"], league_roster["player_name"]))
