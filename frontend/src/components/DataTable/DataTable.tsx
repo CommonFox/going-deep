@@ -31,17 +31,18 @@ export function DataTable<T>({
     const column = columns.find((c) => c.key === sortKey)
     if (!column?.accessor) return rows
 
-    const sorted = [...rows].sort((a, b) => {
+    // Direction flips the sign of a real comparison, never the null placement — reversing the
+    // whole sorted array after the fact (the previous approach) moved nulls from the end to the
+    // start on 'desc', which is exactly the placement this rule forbids.
+    return [...rows].sort((a, b) => {
       const av = column.accessor!(a)
       const bv = column.accessor!(b)
       if (av == null && bv == null) return 0
       if (av == null) return 1 // nulls sort last regardless of direction
       if (bv == null) return -1
-      if (av < bv) return -1
-      if (av > bv) return 1
-      return 0
+      const comparison = av < bv ? -1 : av > bv ? 1 : 0
+      return sortDir === 'asc' ? comparison : -comparison
     })
-    return sortDir === 'asc' ? sorted : sorted.reverse()
   }, [rows, sortKey, sortDir, columns])
 
   function handleSort(column: Column<T>) {

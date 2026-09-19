@@ -30,9 +30,12 @@ export interface WaiverRankingRow {
   availability: 'free_agent' | 'on_waivers'
   weekly_points: number | null
   weekly_points_source: string | null
-  ros_points: number
-  replacement_level_points: number
-  starters_at_position: number
+  // Both nullable per waiver_rankings.py: ros_points is a LEFT JOIN (no consensus_projections row
+  // at all is possible, not just no weekly_stats), and replacement_level_points/
+  // starters_at_position come from the same LEFT JOIN'd (league_key, position) row together.
+  ros_points: number | null
+  replacement_level_points: number | null
+  starters_at_position: number | null
 }
 
 export const fixtureManifest: Manifest = {
@@ -135,5 +138,19 @@ export const waiverRankingsFixture: WaiverRankingRow[] = [
     ros_points: 8.3,
     replacement_level_points: 149.5,
     starters_at_position: 10,
+  },
+  {
+    league_key: 'espn',
+    season: 2026,
+    week: 2,
+    player_id: null,
+    player_name: 'Deep Camp Body',
+    position: 'QB',
+    availability: 'free_agent',
+    weekly_points: null,
+    weekly_points_source: null,
+    ros_points: null,
+    replacement_level_points: null,
+    starters_at_position: null,
   },
 ]

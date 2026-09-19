@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DataTable, type Column } from '../components/DataTable/DataTable'
+import { DataTable } from '../components/DataTable/DataTable'
 import { DetailPanel, type DetailSection } from '../components/DetailPanel/DetailPanel'
 import { StatTile } from '../components/StatTile/StatTile'
 import { EmptyState } from '../components/EmptyState/EmptyState'
@@ -9,67 +9,11 @@ import { FreshnessBannerView } from '../components/FreshnessBanner/FreshnessBann
 import { stalenessWarning } from '../lib/manifest'
 import { getRowKey } from '../lib/rowKey'
 import { starterColumns as optimalLineupColumns } from '../lib/lineupColumns'
-import {
-  optimalLineupFixture,
-  waiverRankingsFixture,
-  staleFixtureManifest,
-  type WaiverRankingRow,
-} from '../lib/fixtures'
+import { waiverColumns } from '../lib/waiverColumns'
+import { optimalLineupFixture, waiverRankingsFixture, staleFixtureManifest } from '../lib/fixtures'
 import styles from './KitchenSink.module.css'
 
 const TOKENS = ['bg', 'bg-muted', 'ink', 'ink-muted', 'border', 'accent', 'good', 'bad'] as const
-
-const waiverColumns: Column<WaiverRankingRow>[] = [
-  {
-    key: 'player',
-    header: 'Player',
-    render: (r) => (r.player_id ? r.player_name : <span className="unknown">{r.player_name}</span>),
-  },
-  { key: 'position', header: 'Pos', accessor: (r) => r.position },
-  {
-    key: 'availability',
-    header: 'Status',
-    render: (r) =>
-      r.availability === 'on_waivers' ? (
-        <span className={`${styles.badge} ${styles.badgeAccent}`}>on waivers</span>
-      ) : (
-        '—'
-      ),
-  },
-  {
-    key: 'weekly',
-    header: 'Weekly',
-    sortable: true,
-    accessor: (r) => r.weekly_points,
-    render: (r) =>
-      r.weekly_points != null ? (
-        <>
-          {r.weekly_points.toFixed(2)}
-          {r.weekly_points_source === 'espn' && (
-            <span className={`${styles.badge} ${styles.badgeMuted}`} style={{ marginLeft: 6 }}>
-              espn
-            </span>
-          )}
-        </>
-      ) : (
-        <span className="unknown">no projection this week</span>
-      ),
-  },
-  {
-    key: 'ros',
-    header: 'ROS',
-    sortable: true,
-    accessor: (r) => r.ros_points,
-    render: (r) => r.ros_points.toFixed(1),
-  },
-  {
-    key: 'replacement',
-    header: 'Repl. level',
-    sortable: true,
-    accessor: (r) => r.replacement_level_points,
-    render: (r) => r.replacement_level_points.toFixed(1),
-  },
-]
 
 const detailSections: DetailSection[] = [
   {
@@ -168,7 +112,10 @@ export function KitchenSink() {
       </section>
 
       <section className={styles.section}>
-        <h2>Data table — waiver rankings (unidentified player, no weekly projection, ESPN source)</h2>
+        <h2>
+          Data table — waiver rankings (unidentified player, no weekly projection, ESPN source, no
+          replacement-level context)
+        </h2>
         <DataTable
           columns={waiverColumns}
           rows={waiverRankingsFixture}
