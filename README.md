@@ -483,34 +483,46 @@ network access of their own.
   rather than blended into one waiver score, so "who helps me this week" and "who helps me the rest of
   the season" stay separately answerable from the free-agent pool.
 
-## Web app (`src/web/`)
+## Front end (`frontend/`)
 
-A [Streamlit](https://streamlit.io/) app, run with `streamlit run src/web/app.py`, reading the
-warehouse read-only exactly the way notebooks do — through `src.query.q()`, never a held-open
-`duckdb.connect()`, since a connection kept alive across a `streamlit run` session takes the same
-file lock that would make `scripts/build_warehouse.sh` fail with an error that never mentions this
-app. It computes and writes nothing back to the warehouse; every page is a read over a table one of
-the pipelines above already built.
+A React SPA (#111) that replaced the Streamlit app (`src/web/`, retired in #130) once it had two
+pages at parity: `frontend/src/routes/Lineup.tsx` and `Waiver.tsx`. No backend, no database, no
+live query — everything it shows was already decided by the last warehouse rebuild, the same
+reasoning `src/gold/optimal_lineup.py` gives for being a gold table rather than a live tool.
+`frontend/README.md` covers local dev (`npm run dev`, `npm run build`, `npm run test`); this
+section covers the parts that only make sense from the warehouse side — how data gets from a
+rebuild to the deployed site, and why.
 
-- `src/web/app.py` — the entry point. Pure scaffolding: it shows a "warehouse built at" caption and a
-  staleness warning in the sidebar (via `warehouse_status.py`) on every page, then hands off to
-  whichever page under `pages/` was picked, discovered at runtime — adding a page is a new file, not
-  a change to this one.
-- `src/web/warehouse_status.py` — `warehouse_built_at`/`staleness_warning`: how current the warehouse
-  is, read off the file's own mtime rather than a table. A day old is the default staleness threshold
-  (waiver claims and lineup calls both turn on injury/role news that can land any hour); a warning
-  banner rather than `src/draft/live.py`'s hard stop, since nothing here is as irreversible as a bad
-  draft pick.
-- `src/web/pages/home.py` — landing page; a pointer to the other pages, nothing else.
-- `src/web/pages/waiver_board.py` — the waiver board (#85, under the waiver-wire epic #78). Reads
-  `waiver_rankings` per (league, current week) and shows this-week and rest-of-season points as two
-  independently sortable columns rather than one blended score, since a bye-week fill-in and a real
-  role change can rank oppositely on the two. Surfaces on-waivers players (#104) by default, badged
-  rather than hidden, since a just-dropped name is often exactly who opened the page.
-- `src/web/pages/lineup_optimizer.py` — the lineup optimizer (#90, under the lineup-optimizer epic
-  #86). Reads `optimal_lineup`/`optimal_lineup_bench` (built by `src/gold/optimal_lineup.py`, #89)
-  and recomputes no player value itself — matching #86's own reasoning that value is fixed by the
-  warehouse rebuild, and this page only displays what that rebuild already decided.
+**The loop.** Four steps, in order:
+
+1. `scripts/build_warehouse.sh` rebuilds every table and, as its last step, runs
+   `src.export.build` — reads the finished warehouse and writes JSON under `data/export/`, one file
+   per `(table, league_key, season, week)` (see `src/export/build.py`'s own docstring). This part is
+   local and network-free, like every other build step.
+2. `python scripts/publish_export.py` uploads `data/export/` to a private
+   [Vercel Blob](https://vercel.com/docs/vercel-blob) store, at the same relative paths. Deliberately
+   a separate step from (1): the export write has to stay local-only and reproducible from the raw
+   archive alone, and handing the result to Vercel is a distinct, network-dependent action that can
+   fail without threatening that. Requires `BLOB_READ_WRITE_TOKEN` (`.env.example`).
+3. The deployed SPA needs no redeploy for new data — `frontend/api/data.ts`, a small Vercel Function,
+   proxies every data fetch to the private Blob store live, and the browser always fetches with
+   `cache: 'no-store'`. A redeploy (automatic on push to `main`, since the Vercel project is
+   connected to the GitHub repo) is only needed when frontend code changes.
+4. The deployed site is gated by
+   [Vercel Authentication](https://vercel.com/docs/deployment-protection) — this is private league
+   data on an otherwise-public repo, so every route (pages and `api/data.ts` alike) requires a
+   Vercel login from an account added to the project. `frontend/api/data.ts` does no auth check of
+   its own on purpose: Vercel Authentication already rejects an unauthenticated request before it
+   reaches any function on the deployment, so a second check there would be re-verifying a session
+   that was already checked upstream. See `docs/export-format-spike.md` (#125 §3) for the freshness
+   contract this all serves, and the private-storage access-control note it flags for #130.
+
+**The stale banner.** `manifest.json`'s `built_at` is step (1)'s timestamp, not step (2)'s or (3)'s
+— so the banner (`frontend/src/lib/manifest.ts`'s `stalenessWarning`, shown by every page via
+`FreshnessBanner`) answers "how old is the warehouse this data came from," the same question
+`src/web/warehouse_status.py` used to answer for the Streamlit app, same 24-hour threshold and same
+reasoning (waiver claims and lineup calls both turn on injury/role news that can land at any hour).
+It goes stale the moment a rebuild is skipped, regardless of whether steps (2)–(3) ever ran.
 
 ## Environment
 
