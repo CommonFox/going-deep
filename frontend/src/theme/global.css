@@ -61,3 +61,11 @@ td {
   opacity: 0.6;
   border-bottom: 1px dashed var(--ink-muted);
 }
+
+/* The "Week N · <season> season" line every real page (#128, #129) puts under its <h1> — one
+   definition rather than each route's own module re-declaring the same six lines. */
+.caption {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  margin: calc(var(--space) * 2) 0 calc(var(--space) * 6);
+}

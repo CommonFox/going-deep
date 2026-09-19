@@ -1,0 +1,21 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--space) * 5);
+  margin-bottom: calc(var(--space) * 6);
+}
+
+.positionFilter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--space) * 4);
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space) * 1.5);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}

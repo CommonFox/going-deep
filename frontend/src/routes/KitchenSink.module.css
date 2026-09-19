@@ -57,28 +57,6 @@
   flex-wrap: wrap;
 }
 
-.badge {
-  display: inline-flex;
-  padding: calc(var(--space) * 0.5) calc(var(--space) * 2);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  font-weight: 600;
-}
-
-.badgeAccent {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
-
-.badgeMuted {
-  background: color-mix(in srgb, var(--ink-muted) 15%, transparent);
-  color: var(--ink-muted);
-  border: 1px solid var(--border);
-}
-
 .stateGrid {
   display: flex;
   flex-direction: column;

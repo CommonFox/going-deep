@@ -19,29 +19,37 @@ export function DataTable<T>({
   columns,
   rows,
   rowKey,
+  defaultSortKey,
+  defaultSortDir = 'asc',
 }: {
   columns: Column<T>[]
   rows: T[]
   rowKey: (row: T, index: number) => string
+  /** Sorts on mount without waiting for a header click, and shows that column's ▲/▼ from the
+   * start — for a page like /waiver whose Streamlit original always showed an active sort choice,
+   * rather than an unsorted table until the first click. */
+  defaultSortKey?: string
+  defaultSortDir?: 'asc' | 'desc'
 }) {
-  const [sortKey, setSortKey] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [sortKey, setSortKey] = useState<string | null>(defaultSortKey ?? null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(defaultSortDir)
 
   const sortedRows = useMemo(() => {
     const column = columns.find((c) => c.key === sortKey)
     if (!column?.accessor) return rows
 
-    const sorted = [...rows].sort((a, b) => {
+    // Direction flips the sign of a real comparison, never the null placement — reversing the
+    // whole sorted array after the fact (the previous approach) moved nulls from the end to the
+    // start on 'desc', which is exactly the placement this rule forbids.
+    return [...rows].sort((a, b) => {
       const av = column.accessor!(a)
       const bv = column.accessor!(b)
       if (av == null && bv == null) return 0
       if (av == null) return 1 // nulls sort last regardless of direction
       if (bv == null) return -1
-      if (av < bv) return -1
-      if (av > bv) return 1
-      return 0
+      const comparison = av < bv ? -1 : av > bv ? 1 : 0
+      return sortDir === 'asc' ? comparison : -comparison
     })
-    return sortDir === 'asc' ? sorted : sorted.reverse()
   }, [rows, sortKey, sortDir, columns])
 
   function handleSort(column: Column<T>) {
