@@ -3,6 +3,8 @@
  * `schema_version` to refuse a mismatch, and `available` so the app never has to probe with a
  * failed fetch to know which (table, league, season, week) combinations exist. */
 
+import { fetchExportFile } from './exportFetch'
+
 export interface AvailableEntry {
   table: string;
   league_key: string;
@@ -39,13 +41,6 @@ export function stalenessWarning(
   );
 }
 
-/** The real fetch #128/#129 wire up once a page needs it — #127 itself runs the shell against a
- * fixture manifest (see lib/fixtures.ts) since serving data/export/ to a dev server or a deploy is
- * #130's question, not this ticket's. */
 export async function fetchManifest(): Promise<Manifest> {
-  const response = await fetch('/manifest.json', { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`manifest fetch failed: ${response.status}`);
-  }
-  return response.json();
+  return fetchExportFile<Manifest>('manifest.json');
 }

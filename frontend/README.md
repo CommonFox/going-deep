@@ -13,4 +13,4 @@ npm run lint    # oxlint
 `/kitchen-sink` renders every design-system primitive in every state (loading, empty, error,
 stale) against fixture data — the place to eyeball a theme or component change. See #127.
 
-Real pages (`/lineup`, `/waiver`) are still placeholders; they land in #128 and #129.
+`/lineup` is the real lineup optimizer (#128). `/waiver` is still a placeholder; it lands in #129.

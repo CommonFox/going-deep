@@ -3,14 +3,11 @@ import { AppShell } from './components/AppShell/AppShell'
 import { LeagueWeekProvider } from './state/LeagueWeekContext'
 import { fixtureManifest } from './lib/fixtures'
 import { Home } from './routes/Home'
+import { Lineup } from './routes/Lineup'
 import { KitchenSink } from './routes/KitchenSink'
 
-// #128/#129 replace these with real pages; the routes exist now so adding them later is a page,
-// not plumbing.
-function LineupPlaceholder() {
-  return <p>Lineup optimizer lands in #128.</p>
-}
-
+// #129 replaces this with the real waiver board; the route exists now so adding it later is a
+// page, not plumbing.
 function WaiverPlaceholder() {
   return <p>Waiver board lands in #129.</p>
 }
@@ -22,7 +19,7 @@ export function App() {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<Home />} />
-            <Route path="/lineup" element={<LineupPlaceholder />} />
+            <Route path="/lineup" element={<Lineup />} />
             <Route path="/waiver" element={<WaiverPlaceholder />} />
             <Route path="/kitchen-sink" element={<KitchenSink />} />
           </Route>
