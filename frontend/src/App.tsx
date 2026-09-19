@@ -13,6 +13,12 @@ function WaiverPlaceholder() {
 }
 
 export function App() {
+  // Still the fixture, not fetchManifest() — serving data/export/ to a dev server or a deploy is
+  // #130's question (#127's own reasoning for the fixture), so the app shell's switcher and
+  // freshness banner stay fixture-fed until #130 wires that up. /lineup (#128) fetches the real
+  // manifest for its own data independently of this provider, which is why its rendered week can
+  // legitimately differ from what the switcher above it shows — a known, temporary split that
+  // #130 resolves by making this fetch real too.
   return (
     <LeagueWeekProvider manifest={fixtureManifest}>
       <BrowserRouter>
