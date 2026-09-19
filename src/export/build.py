@@ -4,15 +4,17 @@ The only module in this package that touches the world: it reads the finished wa
 through `src.query.q()` (never `duckdb.connect()` directly — the file-lock reason `src/query.py`
 documents applies here exactly as it does to a notebook, and matters more inside a build script,
 where taking a write-blocking lock would be actively bad) and writes the JSON files the SPA reads
-statically. Everything else in this package (`shape.py`, `manifest.py`) is pure — a frame or a
-list of keys in, a JSON-ready structure out.
+statically. Everything else in this package (`shape.py`, `manifest.py`, `current_week.py`) is pure
+— a frame or a list of keys in, a JSON-ready structure out.
 
 Runs as the tail of `scripts/build_warehouse.sh`, after every gold table it reads from has already
 been rebuilt, so the export can never drift from the warehouse that produced it.
 
 Only exports the tables an existing page actually reads for its rendered data today — see #125's
 spike and #126's own scope rule. `my_roster`, `ros_points` and `weekly_projections` go in a
-follow-up once a page needs them, not preemptively.
+follow-up once a page needs them, not preemptively. `current_week.json` is the one exception: not
+a warehouse table, but a value the lineup-optimizer page (#128) needs and `schedules` alone can't
+give it without a live query — see `current_week.py`.
 """
 
 import json
@@ -20,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from src import console
+from src.export.current_week import resolve_current_week
 from src.export.manifest import build_manifest
 from src.export.shape import partition_by_key, to_json_rows
 from src.query import q
@@ -47,6 +50,24 @@ _TABLE_SORT_BY = {
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _current_week_entries(today: str) -> list[dict]:
+    """One `{league_key, season, week}` entry per league in `league_settings`, `week` resolved by
+    `resolve_current_week` against that league's own season. UTC rather than local time, matching
+    every other build-time value in this module — the freshness contract is already build-relative,
+    not clock-relative, so this doesn't introduce a new notion of "now"."""
+    league_settings = q("SELECT DISTINCT league_key, season FROM league_settings")
+    entries = []
+    for _, row in league_settings.iterrows():
+        league_key, season = row["league_key"], int(row["season"])
+        weeks = q(
+            "SELECT week, MAX(gameday) AS ends FROM schedules WHERE season = ? GROUP BY week",
+            [season],
+        )
+        week = resolve_current_week(weeks, today)
+        entries.append({"league_key": league_key, "season": season, "week": week})
+    return sorted(entries, key=lambda entry: (entry["league_key"], entry["season"]))
 
 
 def build_export() -> None:
@@ -79,6 +100,12 @@ def build_export() -> None:
     _write_json(manifest_path, manifest)
     console.archived(manifest_path, len(available))
     console.table("export_manifest", len(available))
+
+    current_week = _current_week_entries(datetime.now(UTC).date().isoformat())
+    current_week_path = EXPORT_PATH / "current_week.json"
+    _write_json(current_week_path, current_week)
+    console.archived(current_week_path, len(current_week))
+    console.table("current_week", len(current_week))
 
 
 if __name__ == "__main__":
