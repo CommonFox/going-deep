@@ -18,12 +18,16 @@ machine just rebuilt the warehouse.
 """
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src import console
-from src.export.build import EXPORT_PATH
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from src import console  # noqa: E402
+from src.export.build import EXPORT_PATH  # noqa: E402
 
 load_dotenv()
 
