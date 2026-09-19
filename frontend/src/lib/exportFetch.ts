@@ -12,7 +12,12 @@ export async function fetchExportFile<T>(path: string): Promise<T> {
 }
 
 /** The `<table>/<league_key>/<season>-<week>.json` key scheme settled in #125 §2, for the
- * week-scoped tables (`optimal_lineup`, `optimal_lineup_bench`, `waiver_rankings`). */
-export function tableFilePath(table: string, leagueKey: string, season: number, week: number): string {
-  return `${table}/${leagueKey}/${season}-${week}.json`
+ * week-scoped tables (`optimal_lineup`, `optimal_lineup_bench`, `waiver_rankings`). Takes the key
+ * as one `{league_key, season, week}` triple — the shape `AvailableEntry`/`CurrentWeekEntry`
+ * already carry — rather than three positional args a caller could transpose. */
+export function tableFilePath(
+  table: string,
+  key: { league_key: string; season: number; week: number },
+): string {
+  return `${table}/${key.league_key}/${key.season}-${key.week}.json`
 }

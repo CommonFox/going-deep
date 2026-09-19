@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import { useLeagueWeek } from '../state/LeagueWeekContext'
-import { DataTable, type Column } from '../components/DataTable/DataTable'
+import { DataTable } from '../components/DataTable/DataTable'
 import { EmptyState } from '../components/EmptyState/EmptyState'
 import { LoadingState } from '../components/LoadingState/LoadingState'
 import { ErrorState } from '../components/ErrorState/ErrorState'
@@ -19,15 +19,9 @@ import { getRowKey } from '../lib/rowKey'
 import { fetchManifest } from '../lib/manifest'
 import { fetchCurrentWeek } from '../lib/currentWeek'
 import { fetchExportFile, tableFilePath } from '../lib/exportFetch'
+import { starterColumns, benchColumns, type BenchRow } from '../lib/lineupColumns'
 import type { OptimalLineupRow } from '../lib/fixtures'
 import styles from './Lineup.module.css'
-
-interface BenchRow {
-  player_id: string | null
-  player_name: string
-  position: string
-  projected_points: number | null
-}
 
 // Display order for starting slots: skill positions, then FLEX/SUPERFLEX, then the rest — ported
 // from lineup_optimizer.py's `_SLOT_ORDER`/`_slot_sort_key`. A slot label not in this list sorts
@@ -41,41 +35,6 @@ function slotSortKey(slot: string): [number, number] {
   const rank = SLOT_ORDER.indexOf(prefix)
   return [rank === -1 ? SLOT_ORDER.length : rank, number]
 }
-
-const starterColumns: Column<OptimalLineupRow>[] = [
-  { key: 'slot', header: 'Slot', accessor: (r) => r.slot },
-  {
-    key: 'player',
-    header: 'Player',
-    render: (r) =>
-      r.player_id ? r.player_name : <span className="unknown">not enough eligible players</span>,
-  },
-  {
-    key: 'projected',
-    header: 'Projected',
-    render: (r) => (r.projected_points != null ? `${r.projected_points.toFixed(2)} pts` : '—'),
-  },
-  {
-    key: 'closeCall',
-    header: 'Close call',
-    render: (r) =>
-      r.is_close_call
-        ? `vs. ${r.bench_player_name} (${(r.bench_projected_points ?? 0).toFixed(2)} pts, +${(
-            (r.projected_points ?? 0) - (r.bench_projected_points ?? 0)
-          ).toFixed(2)})`
-        : '—',
-  },
-]
-
-const benchColumns: Column<BenchRow>[] = [
-  { key: 'player', header: 'Player', accessor: (r) => r.player_name },
-  { key: 'position', header: 'Pos', accessor: (r) => r.position },
-  {
-    key: 'projected',
-    header: 'Projected points',
-    render: (r) => (r.projected_points != null ? r.projected_points.toFixed(2) : '—'),
-  },
-]
 
 type LineupState =
   | { status: 'loading' }
@@ -115,12 +74,8 @@ export function Lineup() {
         }
 
         const [lineup, bench] = await Promise.all([
-          fetchExportFile<OptimalLineupRow[]>(
-            tableFilePath('optimal_lineup', current.league_key, current.season, current.week),
-          ),
-          fetchExportFile<BenchRow[]>(
-            tableFilePath('optimal_lineup_bench', current.league_key, current.season, current.week),
-          ),
+          fetchExportFile<OptimalLineupRow[]>(tableFilePath('optimal_lineup', current)),
+          fetchExportFile<BenchRow[]>(tableFilePath('optimal_lineup_bench', current)),
         ])
         if (!cancelled) {
           setState({ status: 'ready', lineup, bench, season: current.season, week: current.week })
