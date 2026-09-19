@@ -1,12 +1,18 @@
 /** One fetch shape for every file under `data/export/` (see src/export/build.py) — `cache:
  * 'no-store'` so a CDN's cached copy never answers in place of the real file, matching the
  * manifest's own freshness contract (docs/export-format-spike.md, #125) applied to every export
- * file, not just manifest.json. */
+ * file, not just manifest.json.
+ *
+ * The URL differs by build (#130). `npm run dev`'s Vite plugin (vite.config.ts) serves
+ * `data/export/` straight off disk at the file's own path, so a dev build fetches it directly. A
+ * production build has no local warehouse to read — `api/data.ts` proxies to the private Vercel
+ * Blob store instead, which is why only that build prefixes the request through it. */
 
 export async function fetchExportFile<T>(path: string): Promise<T> {
-  const response = await fetch(`/${path}`, { cache: 'no-store' })
+  const url = import.meta.env.PROD ? `/api/data?pathname=${encodeURIComponent(path)}` : `/${path}`
+  const response = await fetch(url, { cache: 'no-store' })
   if (!response.ok) {
-    throw new Error(`fetch failed for /${path}: ${response.status}`)
+    throw new Error(`fetch failed for ${path}: ${response.status}`)
   }
   return response.json()
 }

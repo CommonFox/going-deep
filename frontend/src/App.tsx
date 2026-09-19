@@ -1,21 +1,51 @@
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AppShell } from './components/AppShell/AppShell'
 import { LeagueWeekProvider } from './state/LeagueWeekContext'
-import { fixtureManifest } from './lib/fixtures'
+import { fetchManifest, type Manifest } from './lib/manifest'
+import { LoadingState } from './components/LoadingState/LoadingState'
+import { ErrorState } from './components/ErrorState/ErrorState'
 import { Home } from './routes/Home'
 import { Lineup } from './routes/Lineup'
 import { Waiver } from './routes/Waiver'
 import { KitchenSink } from './routes/KitchenSink'
 
+type ManifestState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; manifest: Manifest }
+
 export function App() {
-  // Still the fixture, not fetchManifest() — serving data/export/ to a dev server or a deploy is
-  // #130's question (#127's own reasoning for the fixture), so the app shell's switcher and
-  // freshness banner stay fixture-fed until #130 wires that up. /lineup (#128) and /waiver (#129)
-  // both fetch the real manifest for their own data independently of this provider, which is why
-  // their rendered week can legitimately differ from what the switcher above them shows — a
-  // known, temporary split that #130 resolves by making this fetch real too.
+  // The real manifest now (#130) — /lineup (#128) and /waiver (#129) already fetched it
+  // independently of this provider, which is why their rendered week could legitimately differ
+  // from what the switcher above them showed while this was still fixture-fed. Loading/error
+  // states mirror Lineup.tsx/Waiver.tsx's own pattern for the same fetch.
+  const [state, setState] = useState<ManifestState>({ status: 'loading' })
+  const [retryToken, setRetryToken] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchManifest()
+      .then((manifest) => {
+        if (!cancelled) setState({ status: 'ready', manifest })
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setState({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [retryToken])
+
+  if (state.status === 'loading') return <LoadingState label="Loading…" />
+  if (state.status === 'error') {
+    return <ErrorState message={state.message} onRetry={() => setRetryToken((token) => token + 1)} />
+  }
+
   return (
-    <LeagueWeekProvider manifest={fixtureManifest}>
+    <LeagueWeekProvider manifest={state.manifest}>
       <BrowserRouter>
         <Routes>
           <Route element={<AppShell />}>
