@@ -2,8 +2,10 @@
  * `src/web/pages/waiver_board.py` at parity: same rows, same default filters, weekly/ROS as two
  * independently sortable columns (never blended), on-waivers players shown by default with a
  * badge, ESPN-sourced weekly points tagged, and replacement-level context per row — now via the
- * data-table primitive instead of one bordered container per row, per the ticket's one
- * presentational change.
+ * data-table primitive instead of one bordered container per row (the ticket's presentational
+ * change), with `DataTable`'s own click-to-sort headers standing in for Streamlit's explicit
+ * "Sort by" radio — `defaultSortKey`/`defaultSortDir` below reproduce its default choice ("This
+ * week", descending) so the table opens already sorted rather than in export order.
  *
  * `waiver_rankings` is already scoped to each league's own current week at build time (see the
  * gold table's own docstring), so unlike `/lineup` this page needs no `current_week.json` lookup —
@@ -78,14 +80,6 @@ export function Waiver() {
     return state.rows
       .filter((row) => positions.includes(row.position))
       .filter((row) => includeOnWaivers || row.availability !== 'on_waivers')
-      // Matches the Streamlit page's own default sort ("This week"/weekly_points desc, nulls
-      // last) — DataTable's own header-click sort still layers on top of this as a starting point.
-      .sort((a, b) => {
-        if (a.weekly_points == null && b.weekly_points == null) return 0
-        if (a.weekly_points == null) return 1
-        if (b.weekly_points == null) return -1
-        return b.weekly_points - a.weekly_points
-      })
   }, [state, positions, includeOnWaivers])
 
   function togglePosition(position: string) {
@@ -104,7 +98,7 @@ export function Waiver() {
   return (
     <div>
       <h1>Waiver Board</h1>
-      <p className={`mono ${styles.caption}`}>
+      <p className="mono caption">
         Week {week} · {season} season
       </p>
 
@@ -138,6 +132,8 @@ export function Waiver() {
           columns={waiverColumns}
           rows={filtered}
           rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
+          defaultSortKey="weekly"
+          defaultSortDir="desc"
         />
       )}
     </div>

@@ -122,7 +122,7 @@ export function Lineup() {
   return (
     <div>
       <h1>Lineup Optimizer</h1>
-      <p className={`mono ${styles.caption}`}>
+      <p className="mono caption">
         Week {week} · {season} season
       </p>
 

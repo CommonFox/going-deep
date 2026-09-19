@@ -19,13 +19,20 @@ export function DataTable<T>({
   columns,
   rows,
   rowKey,
+  defaultSortKey,
+  defaultSortDir = 'asc',
 }: {
   columns: Column<T>[]
   rows: T[]
   rowKey: (row: T, index: number) => string
+  /** Sorts on mount without waiting for a header click, and shows that column's ▲/▼ from the
+   * start — for a page like /waiver whose Streamlit original always showed an active sort choice,
+   * rather than an unsorted table until the first click. */
+  defaultSortKey?: string
+  defaultSortDir?: 'asc' | 'desc'
 }) {
-  const [sortKey, setSortKey] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [sortKey, setSortKey] = useState<string | null>(defaultSortKey ?? null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(defaultSortDir)
 
   const sortedRows = useMemo(() => {
     const column = columns.find((c) => c.key === sortKey)
