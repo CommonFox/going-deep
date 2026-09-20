@@ -18,7 +18,12 @@
  *
  * A close call (#162) is the exception to "collapsed by default": `starterPairing`/`benchPairing`
  * open a flagged starter's panel and its `bench_player_id` counterpart's panel together, and pass
- * each as the other's `opponent` so `buildDetailSections` can tag which side's raw value favors it. */
+ * each as the other's `opponent` so `buildDetailSections` can tag which side's raw value favors it.
+ *
+ * #163 reuses the same `context` map for the tables themselves: each starter/bench row is enriched
+ * with its own `weekly_player_context` row (or `undefined`) right before it reaches `DataTable`, so
+ * `lineupColumns.tsx`'s rank/tier column and `buildDetailSections`' panel field read off the same
+ * row and can never show two different figures for one player/week. */
 
 import { useEffect, useState } from 'react'
 import { useLeagueWeek } from '../state/LeagueWeekContext'
@@ -31,7 +36,13 @@ import { getRowKey } from '../lib/rowKey'
 import { fetchManifest, isAvailable } from '../lib/manifest'
 import { fetchCurrentWeek } from '../lib/currentWeek'
 import { fetchExportFile, tableFilePath } from '../lib/exportFetch'
-import { starterColumns, benchColumns, type BenchRow } from '../lib/lineupColumns'
+import {
+  starterColumns,
+  benchColumns,
+  type BenchRow,
+  type StarterDisplayRow,
+  type BenchDisplayRow,
+} from '../lib/lineupColumns'
 import { benchPairing, buildDetailSections, starterPairing } from '../lib/playerDetail'
 import type { OptimalLineupRow, WeeklyPlayerContextRow } from '../lib/fixtures'
 import styles from './Lineup.module.css'
@@ -47,6 +58,16 @@ function slotSortKey(slot: string): [number, number] {
   const number = match?.[2] ? Number(match[2]) : 0
   const rank = SLOT_ORDER.indexOf(prefix)
   return [rank === -1 ? SLOT_ORDER.length : rank, number]
+}
+
+// #163: the one lookup every table row and every detail panel shares — a player with no id (an
+// empty slot) or no matching `weekly_player_context` row both fall back to `undefined`, which
+// `weeklyRankTier`/`buildDetailSections` already render as the unknown dash.
+function contextFor(
+  playerId: string | null,
+  context: Map<string, WeeklyPlayerContextRow>,
+): WeeklyPlayerContextRow | undefined {
+  return playerId ? context.get(playerId) : undefined
 }
 
 type LineupState =
@@ -157,7 +178,9 @@ export function Lineup() {
         <h2>Starters</h2>
         <DataTable
           columns={starterColumns}
-          rows={starters}
+          rows={starters.map(
+            (row): StarterDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
+          )}
           rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.slot, index)}
         />
         <div className={styles.detailList}>
@@ -171,8 +194,8 @@ export function Lineup() {
                   title={`${row.slot} · ${row.player_name}`}
                   defaultOpen={pairing.defaultOpen}
                   sections={buildDetailSections(
-                    context.get(row.player_id),
-                    pairing.opponentPlayerId ? context.get(pairing.opponentPlayerId) : undefined,
+                    contextFor(row.player_id, context),
+                    contextFor(pairing.opponentPlayerId, context),
                   )}
                 />
               )
@@ -195,7 +218,9 @@ export function Lineup() {
           <>
             <DataTable
               columns={benchColumns}
-              rows={available}
+              rows={available.map(
+                (row): BenchDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
+              )}
               rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
             />
             <div className={styles.detailList}>
@@ -209,8 +234,8 @@ export function Lineup() {
                       title={`${row.player_name} — ${row.position}`}
                       defaultOpen={pairing.defaultOpen}
                       sections={buildDetailSections(
-                        context.get(row.player_id),
-                        pairing.opponentPlayerId ? context.get(pairing.opponentPlayerId) : undefined,
+                        contextFor(row.player_id, context),
+                        contextFor(pairing.opponentPlayerId, context),
                       )}
                     />
                   )

@@ -37,6 +37,20 @@
  * 16. Calling `buildDetailSections(row)` with no `opponent` argument — the #161 call shape — never
  *     tones a field `'good'`, matching the existing no-opponent behavior exactly.
  *
+ * `weeklyRankTier` (#163 — shared by the Lineup table column and this same detail panel, so both
+ * read `weekly_position_rank`/`weekly_position_tier` through one formatter rather than two):
+ *
+ * 17. A row with both columns populated formats as `"<position><rank> · tier <tier>"`, e.g. "QB3 ·
+ *     tier 1".
+ * 18. `undefined` (no `weekly_player_context` row at all) returns the unknown dash `'—'`.
+ * 19. `weekly_position_rank: null` on an otherwise fully populated row returns `'—'` — the "no
+ *     projection that week" case `weekly_player_context.py` nulls the rank out for, not "rank 0" or
+ *     blank.
+ * 20. `buildDetailSections` surfaces the identical string under a `'Position rank / tier'` field in
+ *     the `Matchup & environment` section — same section #161 already puts `Defense rank` in.
+ * 21. That field carries `tone: 'unknown'` exactly when the rank is null, and otherwise no
+ *     `'unknown'`/`'good'` tone — it isn't in #162's toned set, so an opponent row never moves it.
+ *
  * Pairing (`starterPairing` / `benchPairing`):
  * 17. A close-call starter row (`is_close_call: true`) returns `defaultOpen: true` and
  *     `opponentPlayerId` equal to its `bench_player_id`.
@@ -54,7 +68,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { benchPairing, buildDetailSections, starterPairing } from './playerDetail'
+import { benchPairing, buildDetailSections, starterPairing, weeklyRankTier } from './playerDetail'
 import type { OptimalLineupRow, WeeklyPlayerContextRow } from './fixtures'
 
 const FULL_ROW: WeeklyPlayerContextRow = {
@@ -209,6 +223,49 @@ describe('buildDetailSections', () => {
     const unknownBucket = buildDetailSections({ ...FULL_ROW, game_gamescript_lean: 'made_up_bucket' })
     const field = allFields(unknownBucket).find((f) => f.label === 'Gamescript lean')
     expect(field?.value).toBe('made_up_bucket')
+  })
+
+  it('surfaces weekly_position_rank/tier under Matchup & environment, matching weeklyRankTier exactly', () => {
+    const sections = buildDetailSections(FULL_ROW)
+    const field = allFields(sections).find((f) => f.label === 'Position rank / tier')
+    const section = sections.find((s) => s.fields.includes(field!))
+    expect(section?.title).toBe('Matchup & environment')
+    expect(field?.value).toBe(weeklyRankTier(FULL_ROW))
+    expect(field?.value).toBe('QB3 · tier 1')
+    expect(field?.tone).not.toBe('unknown')
+  })
+
+  it('marks Position rank / tier unknown when weekly_position_rank is null', () => {
+    const row: WeeklyPlayerContextRow = { ...FULL_ROW, weekly_position_rank: null, weekly_position_tier: null }
+    const sections = buildDetailSections(row)
+    const field = allFields(sections).find((f) => f.label === 'Position rank / tier')
+    expect(field?.tone).toBe('unknown')
+    expect(field?.value).toBe('—')
+  })
+})
+
+describe('weeklyRankTier', () => {
+  it('formats a populated row as "<position><rank> · tier <tier>"', () => {
+    expect(weeklyRankTier(FULL_ROW)).toBe('QB3 · tier 1')
+  })
+
+  it('formats a WR ranked outside tier 1 the same way', () => {
+    const row: WeeklyPlayerContextRow = {
+      ...FULL_ROW,
+      position: 'WR',
+      weekly_position_rank: 22,
+      weekly_position_tier: 2,
+    }
+    expect(weeklyRankTier(row)).toBe('WR22 · tier 2')
+  })
+
+  it('returns the unknown dash when there is no row at all', () => {
+    expect(weeklyRankTier(undefined)).toBe('—')
+  })
+
+  it('returns the unknown dash when weekly_position_rank is null on an otherwise-populated row', () => {
+    const row: WeeklyPlayerContextRow = { ...FULL_ROW, weekly_position_rank: null, weekly_position_tier: null }
+    expect(weeklyRankTier(row)).toBe('—')
   })
 })
 
