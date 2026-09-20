@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { DataTable } from '../components/DataTable/DataTable'
-import { DetailPanel, type DetailSection } from '../components/DetailPanel/DetailPanel'
+import { DetailPanel } from '../components/DetailPanel/DetailPanel'
 import { StatTile } from '../components/StatTile/StatTile'
 import { EmptyState } from '../components/EmptyState/EmptyState'
 import { LoadingState } from '../components/LoadingState/LoadingState'
@@ -10,37 +10,20 @@ import { stalenessWarning } from '../lib/manifest'
 import { getRowKey } from '../lib/rowKey'
 import { starterColumns as optimalLineupColumns } from '../lib/lineupColumns'
 import { waiverColumns } from '../lib/waiverColumns'
-import { optimalLineupFixture, waiverRankingsFixture, staleFixtureManifest } from '../lib/fixtures'
+import { buildDetailSections } from '../lib/playerDetail'
+import {
+  optimalLineupFixture,
+  waiverRankingsFixture,
+  weeklyPlayerContextFixture,
+  staleFixtureManifest,
+} from '../lib/fixtures'
 import styles from './KitchenSink.module.css'
 
 const TOKENS = ['bg', 'bg-muted', 'ink', 'ink-muted', 'border', 'accent', 'good', 'bad'] as const
 
-const detailSections: DetailSection[] = [
-  {
-    title: 'Projections',
-    fields: [
-      { label: 'Sleeper', value: '9.97' },
-      { label: 'FantasyPros', value: '11.20' },
-      { label: 'ESPN', value: '—', tone: 'unknown' },
-    ],
-  },
-  {
-    title: 'Matchup',
-    fields: [
-      { label: 'Opponent', value: 'vs. DEN' },
-      { label: 'Positional rank allowed', value: 'WR22', tone: 'bad' },
-      { label: 'Implied team total', value: '24.5', tone: 'good' },
-    ],
-  },
-  {
-    title: 'Role trend',
-    fields: [
-      { label: 'Snap share (L3)', value: '71%' },
-      { label: 'Target share (L3)', value: '19%' },
-      { label: 'Direction', value: 'rising', tone: 'good' },
-    ],
-  },
-]
+// Pierce, not Stroud: the fixture with several columns null, so the gallery shows the
+// unknown-tone convention alongside real formatted values in the same panel.
+const detailSections = buildDetailSections(weeklyPlayerContextFixture[1])
 
 const staleMessage = stalenessWarning(new Date(staleFixtureManifest.built_at), new Date())
 

@@ -74,6 +74,14 @@ function gamescriptLean(value: string | null | undefined): DetailField {
   return { label, value: GAMESCRIPT_LABELS[value] ?? value }
 }
 
+// FantasyPros contributes a positional rank, not a points total (weekly_player_context.py's own
+// docstring), so it reads as "WR12" rather than a points figure the way Sleeper/ESPN do.
+function fantasyProsRank(position: string | null | undefined, posRank: number | null | undefined): DetailField {
+  const label = 'FantasyPros'
+  if (posRank == null || position == null) return { label, value: UNKNOWN, tone: 'unknown' }
+  return { label, value: `${position}${posRank}` }
+}
+
 export function buildDetailSections(row: WeeklyPlayerContextRow | undefined): DetailSection[] {
   return [
     {
@@ -81,9 +89,7 @@ export function buildDetailSections(row: WeeklyPlayerContextRow | undefined): De
       fields: [
         points(row?.sleeper_points, 'Sleeper'),
         points(row?.espn_points, 'ESPN'),
-        row?.fantasypros_pos_rank == null
-          ? { label: 'FantasyPros', value: UNKNOWN, tone: 'unknown' }
-          : { label: 'FantasyPros', value: `${row.position}${row.fantasypros_pos_rank}` },
+        fantasyProsRank(row?.position, row?.fantasypros_pos_rank),
         points(row?.points_gap, 'Source gap'),
       ],
     },

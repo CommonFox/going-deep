@@ -24,7 +24,7 @@ import { EmptyState } from '../components/EmptyState/EmptyState'
 import { LoadingState } from '../components/LoadingState/LoadingState'
 import { ErrorState } from '../components/ErrorState/ErrorState'
 import { getRowKey } from '../lib/rowKey'
-import { fetchManifest } from '../lib/manifest'
+import { fetchManifest, isAvailable } from '../lib/manifest'
 import { fetchCurrentWeek } from '../lib/currentWeek'
 import { fetchExportFile, tableFilePath } from '../lib/exportFetch'
 import { starterColumns, benchColumns, type BenchRow } from '../lib/lineupColumns'
@@ -75,13 +75,7 @@ export function Lineup() {
 
         // The manifest's `available` list answers "does this file exist" so this never has to
         // probe with a fetch that 404s — the same rule `LeagueWeekContext`'s combo list follows.
-        const hasLineup = manifest.available.some(
-          (entry) =>
-            entry.table === 'optimal_lineup' &&
-            entry.league_key === current.league_key &&
-            entry.season === current.season &&
-            entry.week === current.week,
-        )
+        const hasLineup = isAvailable(manifest, 'optimal_lineup', current)
         if (!hasLineup) {
           if (!cancelled) {
             setState({
@@ -96,13 +90,7 @@ export function Lineup() {
           return
         }
 
-        const hasContext = manifest.available.some(
-          (entry) =>
-            entry.table === 'weekly_player_context' &&
-            entry.league_key === current.league_key &&
-            entry.season === current.season &&
-            entry.week === current.week,
-        )
+        const hasContext = isAvailable(manifest, 'weekly_player_context', current)
 
         const [lineup, bench, contextRows] = await Promise.all([
           fetchExportFile<OptimalLineupRow[]>(tableFilePath('optimal_lineup', current)),
