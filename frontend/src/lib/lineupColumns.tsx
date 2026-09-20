@@ -3,7 +3,8 @@
  * shape change — kept in one place rather than each defining its own copy of the same columns. */
 
 import type { Column } from '../components/DataTable/DataTable'
-import type { OptimalLineupRow } from './fixtures'
+import type { OptimalLineupRow, WeeklyPlayerContextRow } from './fixtures'
+import { weeklyRankTier } from './playerDetail'
 
 export interface BenchRow {
   player_id: string | null
@@ -12,7 +13,15 @@ export interface BenchRow {
   projected_points: number | null
 }
 
-export const starterColumns: Column<OptimalLineupRow>[] = [
+// #163: the row shape `Lineup.tsx` actually hands the table — the exported `optimal_lineup`/
+// `optimal_lineup_bench` row plus whichever `weekly_player_context` row matches that player, if
+// any, so the rank/tier column below can read it without a second lookup of its own. `context` is
+// optional rather than required so a caller with no context loaded (the kitchen sink's static
+// fixtures) still type-checks, rendering the same unknown dash a missing row gets anywhere else.
+export type StarterDisplayRow = OptimalLineupRow & { context?: WeeklyPlayerContextRow }
+export type BenchDisplayRow = BenchRow & { context?: WeeklyPlayerContextRow }
+
+export const starterColumns: Column<StarterDisplayRow>[] = [
   { key: 'slot', header: 'Slot', accessor: (r) => r.slot },
   {
     key: 'player',
@@ -25,6 +34,7 @@ export const starterColumns: Column<OptimalLineupRow>[] = [
     header: 'Projected',
     render: (r) => (r.projected_points != null ? `${r.projected_points.toFixed(2)} pts` : '—'),
   },
+  { key: 'rankTier', header: 'Rank / tier', render: (r) => weeklyRankTier(r.context) },
   {
     key: 'closeCall',
     header: 'Close call',
@@ -40,7 +50,7 @@ export const starterColumns: Column<OptimalLineupRow>[] = [
   },
 ]
 
-export const benchColumns: Column<BenchRow>[] = [
+export const benchColumns: Column<BenchDisplayRow>[] = [
   { key: 'player', header: 'Player', accessor: (r) => r.player_name },
   { key: 'position', header: 'Pos', accessor: (r) => r.position },
   {
@@ -48,4 +58,5 @@ export const benchColumns: Column<BenchRow>[] = [
     header: 'Projected points',
     render: (r) => (r.projected_points != null ? r.projected_points.toFixed(2) : '—'),
   },
+  { key: 'rankTier', header: 'Rank / tier', render: (r) => weeklyRankTier(r.context) },
 ]

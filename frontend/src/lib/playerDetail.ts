@@ -92,6 +92,21 @@ function fantasyProsRank(position: string | null | undefined, posRank: number | 
   return { label, value: `${position}${posRank}` }
 }
 
+// #163: the same formatter backs the Lineup table's rank/tier column (lineupColumns.tsx) and this
+// panel's own field below, so the two can never disagree on one player/week. `weekly_position_rank`
+// is nulled by weekly_player_context.py itself for a player with no projection that week — "last
+// place, arbitrarily" isn't a fact worth reporting, so that reads as unknown rather than "rank 0".
+export function weeklyRankTier(row: WeeklyPlayerContextRow | undefined): string {
+  if (row?.weekly_position_rank == null || row?.weekly_position_tier == null) return UNKNOWN
+  return `${row.position}${row.weekly_position_rank} · tier ${row.weekly_position_tier}`
+}
+
+function rankTierField(row: WeeklyPlayerContextRow | undefined): DetailField {
+  const label = 'Position rank / tier'
+  const value = weeklyRankTier(row)
+  return value === UNKNOWN ? { label, value, tone: 'unknown' } : { label, value }
+}
+
 // Whether a higher or a lower raw value is the one that favors a player — `role_depth_rank` is the
 // one field in #162's list where rank 1 (lowest number) is best, inverted from every share/z-score
 // around it.
@@ -139,6 +154,7 @@ export function buildDetailSections(
       title: 'Matchup & environment',
       fields: [
         text(row?.game_opponent, 'Opponent'),
+        rankTierField(row),
         toned(
           points(row?.game_implied_team_total, 'Implied team total'),
           row?.game_implied_team_total,
