@@ -21,10 +21,14 @@ def _native(value):
     """One cell, normalized to a type `json.dumps` accepts. `pd.isna` catches every missing-value
     spelling pandas uses (`NaN`, `None`, `NaT`) in one check; `np.generic` is the common base class
     every numpy scalar type shares, so `.item()` covers int64/float64/bool_/etc. without needing a
-    case per dtype.
+    case per dtype. `pd.Timestamp` (weekly_player_context's `game_kickoff`) needs its own branch:
+    it implements no `.item()`, being a pandas type rather than a numpy scalar, so it would
+    otherwise fall through to `json.dumps` unconverted and raise.
     """
     if pd.isna(value):
         return None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
     if hasattr(value, "item"):
         return value.item()
     return value

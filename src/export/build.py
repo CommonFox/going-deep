@@ -36,14 +36,16 @@ SCHEMA_VERSION = 1
 _KEY_COLUMNS = ["league_key", "season", "week"]
 
 # Table -> the columns its export files are sorted by within one (league_key, season, week) file.
-# `player_id` first for the two roster-shaped tables (nullable, so `player_name` breaks ties for
-# the unresolved rows the docstrings in optimal_lineup.py/waiver_rankings.py both call out); `slot`
+# `player_id` first for the roster-shaped tables (nullable, so `player_name` breaks ties for the
+# unresolved rows the docstrings in optimal_lineup.py/waiver_rankings.py both call out, and for
+# weekly_player_context, which has no natural row order the way optimal_lineup has `slot`); `slot`
 # for optimal_lineup, since a starting lineup's own slot ("QB", "RB1", ...) is already the row
 # identity within a single (league, week) — no player_id collision to break a tie on.
 _TABLE_SORT_BY = {
     "optimal_lineup": ["slot"],
     "optimal_lineup_bench": ["player_id", "player_name"],
     "waiver_rankings": ["player_id", "player_name"],
+    "weekly_player_context": ["player_id", "player_name"],
 }
 
 

@@ -2,16 +2,24 @@
  * `src/web/pages/lineup_optimizer.py` at parity: same slot order, same empty-slot and close-call
  * handling, same "no projection this week" distinction on the bench.
  *
- * Reads only the static export (`optimal_lineup`, `optimal_lineup_bench`, `current_week.json`) —
- * never `selection.week`/`selection.season` from `useLeagueWeek()`, because this page has no
- * manual week control of its own, same as the Streamlit page it replaces. `selection.leagueKey`
- * is the one thing it takes from the shared switcher; everything else about "which week" comes
- * from `current_week.json`, resolved at export time from `schedules` (see
- * `src/export/current_week.py`) since the export doesn't carry `schedules` itself. */
+ * Reads the static export (`optimal_lineup`, `optimal_lineup_bench`, `weekly_player_context`,
+ * `current_week.json`) — never `selection.week`/`selection.season` from `useLeagueWeek()`, because
+ * this page has no manual week control of its own, same as the Streamlit page it replaces.
+ * `selection.leagueKey` is the one thing it takes from the shared switcher; everything else about
+ * "which week" comes from `current_week.json`, resolved at export time from `schedules` (see
+ * `src/export/current_week.py`) since the export doesn't carry `schedules` itself.
+ *
+ * `weekly_player_context` (#161) backs a `DetailPanel` under every starter and bench row, collapsed
+ * by default. It's fetched separately from `optimal_lineup`/`optimal_lineup_bench` and only when
+ * the manifest says a file exists for the current (league, season, week) — same check `hasLineup`
+ * makes — because it's a per-player breakdown, not what decides whether the page has a lineup to
+ * show at all; missing it entirely just means every panel renders unknown, same as a player with no
+ * row inside a file that does exist. */
 
 import { useEffect, useState } from 'react'
 import { useLeagueWeek } from '../state/LeagueWeekContext'
 import { DataTable } from '../components/DataTable/DataTable'
+import { DetailPanel } from '../components/DetailPanel/DetailPanel'
 import { EmptyState } from '../components/EmptyState/EmptyState'
 import { LoadingState } from '../components/LoadingState/LoadingState'
 import { ErrorState } from '../components/ErrorState/ErrorState'
@@ -20,7 +28,8 @@ import { fetchManifest } from '../lib/manifest'
 import { fetchCurrentWeek } from '../lib/currentWeek'
 import { fetchExportFile, tableFilePath } from '../lib/exportFetch'
 import { starterColumns, benchColumns, type BenchRow } from '../lib/lineupColumns'
-import type { OptimalLineupRow } from '../lib/fixtures'
+import { buildDetailSections } from '../lib/playerDetail'
+import type { OptimalLineupRow, WeeklyPlayerContextRow } from '../lib/fixtures'
 import styles from './Lineup.module.css'
 
 // Display order for starting slots: skill positions, then FLEX/SUPERFLEX, then the rest — ported
@@ -39,7 +48,14 @@ function slotSortKey(slot: string): [number, number] {
 type LineupState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; lineup: OptimalLineupRow[]; bench: BenchRow[]; season: number; week: number }
+  | {
+      status: 'ready'
+      lineup: OptimalLineupRow[]
+      bench: BenchRow[]
+      context: Map<string, WeeklyPlayerContextRow>
+      season: number
+      week: number
+    }
 
 export function Lineup() {
   const { selection } = useLeagueWeek()
@@ -68,17 +84,36 @@ export function Lineup() {
         )
         if (!hasLineup) {
           if (!cancelled) {
-            setState({ status: 'ready', lineup: [], bench: [], season: current.season, week: current.week })
+            setState({
+              status: 'ready',
+              lineup: [],
+              bench: [],
+              context: new Map(),
+              season: current.season,
+              week: current.week,
+            })
           }
           return
         }
 
-        const [lineup, bench] = await Promise.all([
+        const hasContext = manifest.available.some(
+          (entry) =>
+            entry.table === 'weekly_player_context' &&
+            entry.league_key === current.league_key &&
+            entry.season === current.season &&
+            entry.week === current.week,
+        )
+
+        const [lineup, bench, contextRows] = await Promise.all([
           fetchExportFile<OptimalLineupRow[]>(tableFilePath('optimal_lineup', current)),
           fetchExportFile<BenchRow[]>(tableFilePath('optimal_lineup_bench', current)),
+          hasContext
+            ? fetchExportFile<WeeklyPlayerContextRow[]>(tableFilePath('weekly_player_context', current))
+            : Promise.resolve<WeeklyPlayerContextRow[]>([]),
         ])
+        const context = new Map(contextRows.map((row) => [row.player_id, row]))
         if (!cancelled) {
-          setState({ status: 'ready', lineup, bench, season: current.season, week: current.week })
+          setState({ status: 'ready', lineup, bench, context, season: current.season, week: current.week })
         }
       } catch (error) {
         if (!cancelled) {
@@ -98,7 +133,7 @@ export function Lineup() {
     return <ErrorState message={state.message} onRetry={() => setRetryToken((token) => token + 1)} />
   }
 
-  const { lineup, bench, season, week } = state
+  const { lineup, bench, context, season, week } = state
 
   if (lineup.length === 0) {
     return (
@@ -133,6 +168,17 @@ export function Lineup() {
           rows={starters}
           rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.slot, index)}
         />
+        <div className={styles.detailList}>
+          {starters
+            .filter((row): row is OptimalLineupRow & { player_id: string } => row.player_id != null)
+            .map((row, index) => (
+              <DetailPanel
+                key={getRowKey(row.player_id, row.player_name, row.slot, index)}
+                title={`${row.slot} · ${row.player_name}`}
+                sections={buildDetailSections(context.get(row.player_id))}
+              />
+            ))}
+        </div>
       </section>
 
       {missing.length > 0 && (
@@ -147,11 +193,24 @@ export function Lineup() {
         {available.length === 0 ? (
           <p className={styles.caption}>Nothing left on the bench with a projection this week.</p>
         ) : (
-          <DataTable
-            columns={benchColumns}
-            rows={available}
-            rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
-          />
+          <>
+            <DataTable
+              columns={benchColumns}
+              rows={available}
+              rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
+            />
+            <div className={styles.detailList}>
+              {available
+                .filter((row): row is BenchRow & { player_id: string } => row.player_id != null)
+                .map((row, index) => (
+                  <DetailPanel
+                    key={getRowKey(row.player_id, row.player_name, row.position, index)}
+                    title={`${row.player_name} — ${row.position}`}
+                    sections={buildDetailSections(context.get(row.player_id))}
+                  />
+                ))}
+            </div>
+          </>
         )}
       </section>
     </div>
