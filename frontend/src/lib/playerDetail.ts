@@ -103,8 +103,10 @@ export function weeklyRankTier(row: WeeklyPlayerContextRow | undefined): string 
 
 function rankTierField(row: WeeklyPlayerContextRow | undefined): DetailField {
   const label = 'Position rank / tier'
-  const value = weeklyRankTier(row)
-  return value === UNKNOWN ? { label, value, tone: 'unknown' } : { label, value }
+  if (row?.weekly_position_rank == null || row?.weekly_position_tier == null) {
+    return { label, value: UNKNOWN, tone: 'unknown' }
+  }
+  return { label, value: weeklyRankTier(row) }
 }
 
 // Whether a higher or a lower raw value is the one that favors a player — `role_depth_rank` is the

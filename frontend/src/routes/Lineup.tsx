@@ -60,6 +60,16 @@ function slotSortKey(slot: string): [number, number] {
   return [rank === -1 ? SLOT_ORDER.length : rank, number]
 }
 
+// #163: the one lookup every table row and every detail panel shares — a player with no id (an
+// empty slot) or no matching `weekly_player_context` row both fall back to `undefined`, which
+// `weeklyRankTier`/`buildDetailSections` already render as the unknown dash.
+function contextFor(
+  playerId: string | null,
+  context: Map<string, WeeklyPlayerContextRow>,
+): WeeklyPlayerContextRow | undefined {
+  return playerId ? context.get(playerId) : undefined
+}
+
 type LineupState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -169,10 +179,7 @@ export function Lineup() {
         <DataTable
           columns={starterColumns}
           rows={starters.map(
-            (row): StarterDisplayRow => ({
-              ...row,
-              context: row.player_id ? context.get(row.player_id) : undefined,
-            }),
+            (row): StarterDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
           )}
           rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.slot, index)}
         />
@@ -187,8 +194,8 @@ export function Lineup() {
                   title={`${row.slot} · ${row.player_name}`}
                   defaultOpen={pairing.defaultOpen}
                   sections={buildDetailSections(
-                    context.get(row.player_id),
-                    pairing.opponentPlayerId ? context.get(pairing.opponentPlayerId) : undefined,
+                    contextFor(row.player_id, context),
+                    contextFor(pairing.opponentPlayerId, context),
                   )}
                 />
               )
@@ -212,10 +219,7 @@ export function Lineup() {
             <DataTable
               columns={benchColumns}
               rows={available.map(
-                (row): BenchDisplayRow => ({
-                  ...row,
-                  context: row.player_id ? context.get(row.player_id) : undefined,
-                }),
+                (row): BenchDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
               )}
               rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
             />
@@ -230,8 +234,8 @@ export function Lineup() {
                       title={`${row.player_name} — ${row.position}`}
                       defaultOpen={pairing.defaultOpen}
                       sections={buildDetailSections(
-                        context.get(row.player_id),
-                        pairing.opponentPlayerId ? context.get(pairing.opponentPlayerId) : undefined,
+                        contextFor(row.player_id, context),
+                        contextFor(pairing.opponentPlayerId, context),
                       )}
                     />
                   )
