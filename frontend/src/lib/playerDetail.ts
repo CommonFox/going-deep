@@ -16,7 +16,8 @@
  * quantiles/rates for the last section.
  *
  * #162's close-call explanation layers on top rather than growing a second shape: `buildDetailSections`
- * takes an optional `opponent` row, and `toned()` re-tags the exact field set #109 named —
+ * takes an optional `opponent` row, and `toned()` re-tags the exact field set #162's own Solution
+ * section named —
  * `game_implied_team_total`, `dvp_vs_league_avg_zscore`, every `role_` share/delta (not
  * `role_depth_rank_delta` — the ticket names the rank itself only) and `role_depth_rank` (inverted:
  * lower is better) — `tone: 'good'` for whichever side's raw value favors it, leaving the other
