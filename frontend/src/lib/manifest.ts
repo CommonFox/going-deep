@@ -44,3 +44,21 @@ export function stalenessWarning(
 export async function fetchManifest(): Promise<Manifest> {
   return fetchExportFile<Manifest>('manifest.json');
 }
+
+/** Whether `table`'s file for `key` is in the manifest's `available` list — the check a page makes
+ * before fetching, so it never has to probe with a fetch that 404s (see this module's own
+ * docstring). One place for the four-field match, rather than each caller re-writing it per table
+ * it checks. */
+export function isAvailable(
+  manifest: Manifest,
+  table: string,
+  key: { league_key: string; season: number; week: number },
+): boolean {
+  return manifest.available.some(
+    (entry) =>
+      entry.table === table &&
+      entry.league_key === key.league_key &&
+      entry.season === key.season &&
+      entry.week === key.week,
+  );
+}

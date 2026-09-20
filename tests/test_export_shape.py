@@ -42,7 +42,23 @@ def test_numpy_scalars_become_native_python_types():
     json.dumps(rows)  # must not raise
 
 
-# 3. Rows come out sorted by the given columns regardless of the input frame's row order, so the
+# 3. A pandas Timestamp (weekly_player_context's `game_kickoff`, the first datetime column any
+#    exported table has carried) becomes an ISO string, not raised on — `.item()` is a numpy-scalar
+#    method `pd.Timestamp` doesn't implement, so the existing numpy branch alone leaves it untouched
+#    and `json.dumps` raises `TypeError: Object of type Timestamp is not JSON serializable`.
+def test_timestamp_becomes_iso_string():
+    frame = pd.DataFrame({
+        "player_id": ["00-1111"],
+        "game_kickoff": [pd.Timestamp("2026-09-14 17:00:00")],
+    })
+
+    rows = to_json_rows(frame, sort_by=["player_id"])
+
+    assert rows[0]["game_kickoff"] == "2026-09-14T17:00:00"
+    json.dumps(rows)  # must not raise
+
+
+# 4. Rows come out sorted by the given columns regardless of the input frame's row order, so the
 #    same table produces the same row order on every rebuild rather than whatever DuckDB happened
 #    to return this time.
 def test_rows_are_sorted_by_sort_by_columns_regardless_of_input_order():
@@ -53,7 +69,7 @@ def test_rows_are_sorted_by_sort_by_columns_regardless_of_input_order():
     assert [row["slot"] for row in rows] == ["QB", "RB1", "WR1"]
 
 
-# 4. Grouping splits a frame into one group per distinct combination of the key columns.
+# 5. Grouping splits a frame into one group per distinct combination of the key columns.
 def test_partition_splits_into_one_group_per_distinct_key():
     frame = pd.DataFrame({
         "league_key": ["sleeper", "sleeper", "espn"],
@@ -69,7 +85,7 @@ def test_partition_splits_into_one_group_per_distinct_key():
     assert len(groups[("espn", 2026, 2)]) == 1
 
 
-# 5. Groups come out in ascending key order regardless of the input frame's row order — the same
+# 6. Groups come out in ascending key order regardless of the input frame's row order — the same
 #    reproducibility guarantee `to_json_rows` gives within a group, at the group level, so the
 #    build's own file-write order (and therefore the manifest's `available` order) doesn't depend
 #    on DuckDB's row order either.
@@ -86,7 +102,7 @@ def test_partition_returns_groups_in_ascending_key_order():
     assert list(groups.keys()) == [("espn", 2026, 2), ("sleeper", 2026, 2), ("sleeper", 2026, 3)]
 
 
-# 6. Every column, including the key columns themselves, stays on each group's frame — this ticket
+# 7. Every column, including the key columns themselves, stays on each group's frame — this ticket
 #    exports each table's full row shape as already produced by its gold model, not a reshaped or
 #    stripped-down one.
 def test_partition_keeps_every_column_including_the_key_columns():
