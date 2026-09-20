@@ -14,7 +14,11 @@
  * the manifest says a file exists for the current (league, season, week) — same check `hasLineup`
  * makes — because it's a per-player breakdown, not what decides whether the page has a lineup to
  * show at all; missing it entirely just means every panel renders unknown, same as a player with no
- * row inside a file that does exist. */
+ * row inside a file that does exist.
+ *
+ * A close call (#162) is the exception to "collapsed by default": `starterPairing`/`benchPairing`
+ * open a flagged starter's panel and its `bench_player_id` counterpart's panel together, and pass
+ * each as the other's `opponent` so `buildDetailSections` can tag which side's raw value favors it. */
 
 import { useEffect, useState } from 'react'
 import { useLeagueWeek } from '../state/LeagueWeekContext'
@@ -28,7 +32,7 @@ import { fetchManifest, isAvailable } from '../lib/manifest'
 import { fetchCurrentWeek } from '../lib/currentWeek'
 import { fetchExportFile, tableFilePath } from '../lib/exportFetch'
 import { starterColumns, benchColumns, type BenchRow } from '../lib/lineupColumns'
-import { buildDetailSections } from '../lib/playerDetail'
+import { benchPairing, buildDetailSections, starterPairing } from '../lib/playerDetail'
 import type { OptimalLineupRow, WeeklyPlayerContextRow } from '../lib/fixtures'
 import styles from './Lineup.module.css'
 
@@ -159,13 +163,20 @@ export function Lineup() {
         <div className={styles.detailList}>
           {starters
             .filter((row): row is OptimalLineupRow & { player_id: string } => row.player_id != null)
-            .map((row, index) => (
-              <DetailPanel
-                key={getRowKey(row.player_id, row.player_name, row.slot, index)}
-                title={`${row.slot} · ${row.player_name}`}
-                sections={buildDetailSections(context.get(row.player_id))}
-              />
-            ))}
+            .map((row, index) => {
+              const pairing = starterPairing(row)
+              return (
+                <DetailPanel
+                  key={getRowKey(row.player_id, row.player_name, row.slot, index)}
+                  title={`${row.slot} · ${row.player_name}`}
+                  defaultOpen={pairing.defaultOpen}
+                  sections={buildDetailSections(
+                    context.get(row.player_id),
+                    pairing.opponentPlayerId ? context.get(pairing.opponentPlayerId) : undefined,
+                  )}
+                />
+              )
+            })}
         </div>
       </section>
 
@@ -190,13 +201,20 @@ export function Lineup() {
             <div className={styles.detailList}>
               {available
                 .filter((row): row is BenchRow & { player_id: string } => row.player_id != null)
-                .map((row, index) => (
-                  <DetailPanel
-                    key={getRowKey(row.player_id, row.player_name, row.position, index)}
-                    title={`${row.player_name} — ${row.position}`}
-                    sections={buildDetailSections(context.get(row.player_id))}
-                  />
-                ))}
+                .map((row, index) => {
+                  const pairing = benchPairing(row.player_id, starters)
+                  return (
+                    <DetailPanel
+                      key={getRowKey(row.player_id, row.player_name, row.position, index)}
+                      title={`${row.player_name} — ${row.position}`}
+                      defaultOpen={pairing.defaultOpen}
+                      sections={buildDetailSections(
+                        context.get(row.player_id),
+                        pairing.opponentPlayerId ? context.get(pairing.opponentPlayerId) : undefined,
+                      )}
+                    />
+                  )
+                })}
             </div>
           </>
         )}

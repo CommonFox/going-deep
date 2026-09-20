@@ -13,12 +13,21 @@
  * game- and dvp-prefixed pair CONTEXT.md's **Defense vs. position** entry calls "figures" for
  * Matchup & environment, the CONTEXT.md **Role** entry's own metric list (snap/target/air-yards/
  * WOPR/carries share, each with a delta, plus depth rank and starter) for Role trend, and outcome
- * quantiles/rates for the last section. `dvp_vs_league_avg_zscore`, `role_depth_rank` and every
- * `role_` share/delta field are the exact set #162 will later tag with `tone: 'good'` for a close
- * call's two panels — named here so that ticket has something to find. */
+ * quantiles/rates for the last section.
+ *
+ * #162's close-call explanation layers on top rather than growing a second shape: `buildDetailSections`
+ * takes an optional `opponent` row, and `toned()` re-tags the exact field set #109 named —
+ * `game_implied_team_total`, `dvp_vs_league_avg_zscore`, every `role_` share/delta (not
+ * `role_depth_rank_delta` — the ticket names the rank itself only) and `role_depth_rank` (inverted:
+ * lower is better) — `tone: 'good'` for whichever side's raw value favors it, leaving the other
+ * neutral rather than `'bad'`. `outcome_ceiling_rate`/`outcome_floor_rate` are deliberately left out
+ * of that set: informational, never a verdict. `starterPairing`/`benchPairing` decide, from
+ * `optimal_lineup`'s own `is_close_call`/`bench_player_id`, which two panels pair up and default
+ * open together; a non-close-call row gets `opponentPlayerId: null`, so `buildDetailSections` falls
+ * back to its #161 single-row shape untouched. */
 
 import type { DetailField, DetailSection } from '../components/DetailPanel/DetailPanel'
-import type { WeeklyPlayerContextRow } from './fixtures'
+import type { OptimalLineupRow, WeeklyPlayerContextRow } from './fixtures'
 
 const UNKNOWN = '—'
 
@@ -82,7 +91,39 @@ function fantasyProsRank(position: string | null | undefined, posRank: number | 
   return { label, value: `${position}${posRank}` }
 }
 
-export function buildDetailSections(row: WeeklyPlayerContextRow | undefined): DetailSection[] {
+// Whether a higher or a lower raw value is the one that favors a player — `role_depth_rank` is the
+// one field in #162's list where rank 1 (lowest number) is best, inverted from every share/z-score
+// around it.
+type ToneDirection = 'higher' | 'lower'
+
+function compareTone(
+  value: number | null | undefined,
+  opponentValue: number | null | undefined,
+  direction: ToneDirection,
+): DetailField['tone'] | undefined {
+  if (value == null || opponentValue == null || value === opponentValue) return undefined
+  const favors = direction === 'higher' ? value > opponentValue : value < opponentValue
+  return favors ? 'good' : undefined
+}
+
+// Re-tags an already-formatted field against a counterpart's raw value, without disturbing the
+// `'unknown'` tone a null value already earned — a close call doesn't make a missing figure less
+// missing, and only the favored side ever moves off neutral (#162: never `'bad'`).
+function toned(
+  field: DetailField,
+  value: number | null | undefined,
+  opponentValue: number | null | undefined,
+  direction: ToneDirection,
+): DetailField {
+  if (field.tone === 'unknown') return field
+  const tone = compareTone(value, opponentValue, direction)
+  return tone ? { ...field, tone } : field
+}
+
+export function buildDetailSections(
+  row: WeeklyPlayerContextRow | undefined,
+  opponent?: WeeklyPlayerContextRow,
+): DetailSection[] {
   return [
     {
       title: 'Projections',
@@ -97,26 +138,81 @@ export function buildDetailSections(row: WeeklyPlayerContextRow | undefined): De
       title: 'Matchup & environment',
       fields: [
         text(row?.game_opponent, 'Opponent'),
-        points(row?.game_implied_team_total, 'Implied team total'),
+        toned(
+          points(row?.game_implied_team_total, 'Implied team total'),
+          row?.game_implied_team_total,
+          opponent?.game_implied_team_total,
+          'higher',
+        ),
         gamescriptLean(row?.game_gamescript_lean),
-        decimal(row?.dvp_vs_league_avg_zscore, 'Defense vs. position (z-score)'),
+        toned(
+          decimal(row?.dvp_vs_league_avg_zscore, 'Defense vs. position (z-score)'),
+          row?.dvp_vs_league_avg_zscore,
+          opponent?.dvp_vs_league_avg_zscore,
+          'higher',
+        ),
         rank(row?.dvp_rank, 'Defense rank'),
       ],
     },
     {
       title: 'Role trend',
       fields: [
-        percent(row?.role_snap_share, 'Snap share'),
-        deltaPercentagePoints(row?.role_snap_share_delta, 'Snap share Δ'),
-        percent(row?.role_target_share, 'Target share'),
-        deltaPercentagePoints(row?.role_target_share_delta, 'Target share Δ'),
-        percent(row?.role_air_yards_share, 'Air yards share'),
-        deltaPercentagePoints(row?.role_air_yards_share_delta, 'Air yards share Δ'),
-        decimal(row?.role_wopr, 'WOPR'),
-        decimal(row?.role_wopr_delta, 'WOPR Δ'),
-        percent(row?.role_carries_share, 'Carries share'),
-        deltaPercentagePoints(row?.role_carries_share_delta, 'Carries share Δ'),
-        rank(row?.role_depth_rank, 'Depth chart rank'),
+        toned(percent(row?.role_snap_share, 'Snap share'), row?.role_snap_share, opponent?.role_snap_share, 'higher'),
+        toned(
+          deltaPercentagePoints(row?.role_snap_share_delta, 'Snap share Δ'),
+          row?.role_snap_share_delta,
+          opponent?.role_snap_share_delta,
+          'higher',
+        ),
+        toned(
+          percent(row?.role_target_share, 'Target share'),
+          row?.role_target_share,
+          opponent?.role_target_share,
+          'higher',
+        ),
+        toned(
+          deltaPercentagePoints(row?.role_target_share_delta, 'Target share Δ'),
+          row?.role_target_share_delta,
+          opponent?.role_target_share_delta,
+          'higher',
+        ),
+        toned(
+          percent(row?.role_air_yards_share, 'Air yards share'),
+          row?.role_air_yards_share,
+          opponent?.role_air_yards_share,
+          'higher',
+        ),
+        toned(
+          deltaPercentagePoints(row?.role_air_yards_share_delta, 'Air yards share Δ'),
+          row?.role_air_yards_share_delta,
+          opponent?.role_air_yards_share_delta,
+          'higher',
+        ),
+        toned(decimal(row?.role_wopr, 'WOPR'), row?.role_wopr, opponent?.role_wopr, 'higher'),
+        toned(
+          decimal(row?.role_wopr_delta, 'WOPR Δ'),
+          row?.role_wopr_delta,
+          opponent?.role_wopr_delta,
+          'higher',
+        ),
+        toned(
+          percent(row?.role_carries_share, 'Carries share'),
+          row?.role_carries_share,
+          opponent?.role_carries_share,
+          'higher',
+        ),
+        toned(
+          deltaPercentagePoints(row?.role_carries_share_delta, 'Carries share Δ'),
+          row?.role_carries_share_delta,
+          opponent?.role_carries_share_delta,
+          'higher',
+        ),
+        toned(
+          rank(row?.role_depth_rank, 'Depth chart rank'),
+          row?.role_depth_rank,
+          opponent?.role_depth_rank,
+          'lower',
+        ),
         bool(row?.role_is_starter, 'Starter'),
       ],
     },
@@ -131,4 +227,28 @@ export function buildDetailSections(row: WeeklyPlayerContextRow | undefined): De
       ],
     },
   ]
+}
+
+export interface ClosePairing {
+  defaultOpen: boolean
+  opponentPlayerId: string | null
+}
+
+/** A starting slot's row: whether its panel should default open and, if so, which player's
+ * `weekly_player_context` row `buildDetailSections` should compare it against. Only a close call
+ * pairs two panels — every other row opens exactly as #161 left it. */
+export function starterPairing(row: OptimalLineupRow): ClosePairing {
+  if (!row.is_close_call) return { defaultOpen: false, opponentPlayerId: null }
+  return { defaultOpen: true, opponentPlayerId: row.bench_player_id }
+}
+
+/** The bench-side mirror of `starterPairing`: a bench player's panel opens and tones against
+ * whichever close-call starter named them as its `bench_player_id`, if any starter did. One bench
+ * player can be the flagged alternative for more than one slot at once (seen live: a single tight
+ * end sitting behind both the FLEX and TE close calls in the same lineup) — `DetailField` only
+ * carries one tone per field, so this pairs with the first such starter in `starters`' own order
+ * rather than inventing a way to blend multiple comparisons into one panel. */
+export function benchPairing(benchPlayerId: string, starters: OptimalLineupRow[]): ClosePairing {
+  const starter = starters.find((s) => s.is_close_call && s.bench_player_id === benchPlayerId)
+  return starter ? { defaultOpen: true, opponentPlayerId: starter.player_id } : { defaultOpen: false, opponentPlayerId: null }
 }

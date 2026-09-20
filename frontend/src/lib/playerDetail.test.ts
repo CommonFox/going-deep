@@ -14,11 +14,48 @@
  *    leading `-` (no double sign from string-concatenating onto an already-negative number).
  * 7. Every `game_gamescript_lean` bucket maps to its humanized label, and a value outside the known
  *    buckets passes through unchanged rather than throwing or going blank.
+ *
+ * Test cases enumerated before the #162 close-call work was added:
+ *
+ * Tone comparison (`buildDetailSections(row, opponent)`):
+ * 8. A toned field where `row`'s raw value is more favorable than `opponent`'s gets `tone: 'good'`;
+ *    the same field on `opponent`'s own sections stays untoned (neutral, never `'bad'`).
+ * 9. Reversing which side is more favorable flips which side gets `tone: 'good'`.
+ * 10. Equal raw values on a toned field leave both sides untoned — no arbitrary winner on a tie.
+ * 11. A null value on either side of a toned field leaves both sides untoned for that field; the
+ *     null side's own `tone: 'unknown'` is unaffected by the comparison.
+ * 12. `role_depth_rank` is inverted from every other toned field: the *lower* rank number gets
+ *     `tone: 'good'`.
+ * 13. Every field #162 lists — `game_implied_team_total`, `dvp_vs_league_avg_zscore`, each `role_`
+ *     share and its `_delta` (snap/target/air_yards/wopr/carries), and `role_depth_rank` — resolves
+ *     a `'good'` tone for whichever side's raw value favors it, checked table-driven over the full
+ *     set.
+ * 14. `outcome_ceiling_rate`/`outcome_floor_rate` never carry `tone: 'good'`, even when one side is
+ *     strictly better on that figure — informational, not part of the compared set.
+ * 15. Fields outside #162's list (Sleeper/ESPN points, FantasyPros rank, Defense rank, Outcome
+ *     median/floor/ceiling) are untouched by an opponent row.
+ * 16. Calling `buildDetailSections(row)` with no `opponent` argument — the #161 call shape — never
+ *     tones a field `'good'`, matching the existing no-opponent behavior exactly.
+ *
+ * Pairing (`starterPairing` / `benchPairing`):
+ * 17. A close-call starter row (`is_close_call: true`) returns `defaultOpen: true` and
+ *     `opponentPlayerId` equal to its `bench_player_id`.
+ * 18. A non-close-call starter row returns `defaultOpen: false` and `opponentPlayerId: null`.
+ * 19. A bench player whose id matches a close-call starter's `bench_player_id` returns
+ *     `defaultOpen: true` and `opponentPlayerId` equal to that starter's `player_id`.
+ * 20. A bench player named by no starter's close call returns `defaultOpen: false` and
+ *     `opponentPlayerId: null`.
+ * 21. With two independent close calls in the same lineup, `benchPairing` resolves each bench
+ *     player against the specific starter that named them, not any close call in the list.
+ * 22. When two close-call starters share the same `bench_player_id` (seen in real export data —
+ *     one bench tight end backing up both a FLEX and a TE close call), `benchPairing` still opens
+ *     and pairs with the first matching starter in array order, rather than throwing or picking
+ *     arbitrarily on each call.
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildDetailSections } from './playerDetail'
-import type { WeeklyPlayerContextRow } from './fixtures'
+import { benchPairing, buildDetailSections, starterPairing } from './playerDetail'
+import type { OptimalLineupRow, WeeklyPlayerContextRow } from './fixtures'
 
 const FULL_ROW: WeeklyPlayerContextRow = {
   league_key: 'sleeper',
@@ -172,5 +209,199 @@ describe('buildDetailSections', () => {
     const unknownBucket = buildDetailSections({ ...FULL_ROW, game_gamescript_lean: 'made_up_bucket' })
     const field = allFields(unknownBucket).find((f) => f.label === 'Gamescript lean')
     expect(field?.value).toBe('made_up_bucket')
+  })
+})
+
+// Strictly better than FULL_ROW on every #162-toned field except `role_depth_rank`, where lower
+// wins — FULL_ROW's rank of 1 already beats this row's 3, so FULL_ROW is the favored side on every
+// toned field below.
+const WORSE_ROW: WeeklyPlayerContextRow = {
+  ...FULL_ROW,
+  player_id: '00-0038606',
+  player_name: 'Parker Washington',
+  game_implied_team_total: 18.0,
+  dvp_vs_league_avg_zscore: -0.1,
+  role_snap_share: 0.5,
+  role_snap_share_delta: -0.05,
+  role_target_share: 0.02,
+  role_target_share_delta: -0.03,
+  role_air_yards_share: 0.01,
+  role_air_yards_share_delta: -0.02,
+  role_wopr: 0.05,
+  role_wopr_delta: -0.01,
+  role_carries_share: 0.03,
+  role_carries_share_delta: -0.08,
+  role_depth_rank: 3,
+  outcome_ceiling_rate: 0.05,
+}
+
+// The full #162-toned field set, paired with the direction FULL_ROW is favored on each — FULL_ROW
+// beats WORSE_ROW on all of them (higher on every share/z-score/total, lower on depth rank).
+const TONED_LABELS = [
+  'Implied team total',
+  'Defense vs. position (z-score)',
+  'Snap share',
+  'Snap share Δ',
+  'Target share',
+  'Target share Δ',
+  'Air yards share',
+  'Air yards share Δ',
+  'WOPR',
+  'WOPR Δ',
+  'Carries share',
+  'Carries share Δ',
+  'Depth chart rank',
+]
+
+describe('buildDetailSections close-call tone comparison', () => {
+  it('tags the favored side tone: good and leaves the other side untoned', () => {
+    const favored = allFields(buildDetailSections(FULL_ROW, WORSE_ROW))
+    const disfavored = allFields(buildDetailSections(WORSE_ROW, FULL_ROW))
+    const favoredField = favored.find((f) => f.label === 'Implied team total')
+    const disfavoredField = disfavored.find((f) => f.label === 'Implied team total')
+    expect(favoredField?.tone).toBe('good')
+    expect(disfavoredField?.tone).not.toBe('good')
+  })
+
+  it('flips which side is tagged good when which row is more favorable reverses', () => {
+    // WORSE_ROW as the primary row, but now compared against something worse than itself.
+    const evenWorse: WeeklyPlayerContextRow = { ...WORSE_ROW, game_implied_team_total: 10.0 }
+    const sections = buildDetailSections(WORSE_ROW, evenWorse)
+    const field = allFields(sections).find((f) => f.label === 'Implied team total')
+    expect(field?.tone).toBe('good')
+  })
+
+  it('leaves both sides untoned on a tie', () => {
+    const tiedOpponent: WeeklyPlayerContextRow = { ...WORSE_ROW, dvp_vs_league_avg_zscore: FULL_ROW.dvp_vs_league_avg_zscore }
+    const a = allFields(buildDetailSections(FULL_ROW, tiedOpponent)).find(
+      (f) => f.label === 'Defense vs. position (z-score)',
+    )
+    const b = allFields(buildDetailSections(tiedOpponent, FULL_ROW)).find(
+      (f) => f.label === 'Defense vs. position (z-score)',
+    )
+    expect(a?.tone).not.toBe('good')
+    expect(b?.tone).not.toBe('good')
+  })
+
+  it('leaves a toned field untoned on both sides when either side is null, without disturbing the null side\'s own unknown tone', () => {
+    const opponentMissingWopr: WeeklyPlayerContextRow = { ...WORSE_ROW, role_wopr: null }
+    const rowField = allFields(buildDetailSections(FULL_ROW, opponentMissingWopr)).find((f) => f.label === 'WOPR')
+    const opponentField = allFields(buildDetailSections(opponentMissingWopr, FULL_ROW)).find(
+      (f) => f.label === 'WOPR',
+    )
+    expect(rowField?.tone).not.toBe('good')
+    expect(opponentField?.tone).toBe('unknown')
+  })
+
+  it('inverts role_depth_rank: the lower rank number is favored even when otherwise behind', () => {
+    const lowerRankButOtherwiseWorse: WeeklyPlayerContextRow = { ...WORSE_ROW, role_depth_rank: 1 }
+    const higherRankButOtherwiseBetter: WeeklyPlayerContextRow = { ...FULL_ROW, role_depth_rank: 5 }
+    const sections = buildDetailSections(lowerRankButOtherwiseWorse, higherRankButOtherwiseBetter)
+    const field = allFields(sections).find((f) => f.label === 'Depth chart rank')
+    expect(field?.tone).toBe('good')
+  })
+
+  it('resolves a good tone for the favored side across every #162-listed field', () => {
+    const sections = allFields(buildDetailSections(FULL_ROW, WORSE_ROW))
+    for (const label of TONED_LABELS) {
+      const field = sections.find((f) => f.label === label)
+      expect(field?.tone, `${label} should be toned good`).toBe('good')
+    }
+  })
+
+  it('never tones outcome_ceiling_rate/outcome_floor_rate even when one side is strictly better', () => {
+    const sections = allFields(buildDetailSections(FULL_ROW, WORSE_ROW))
+    expect(sections.find((f) => f.label === 'Ceiling rate')?.tone).not.toBe('good')
+    expect(sections.find((f) => f.label === 'Floor rate')?.tone).not.toBe('good')
+  })
+
+  it('leaves fields outside the #162 list untouched by an opponent row', () => {
+    const sections = allFields(buildDetailSections(FULL_ROW, WORSE_ROW))
+    for (const label of ['Sleeper', 'ESPN', 'FantasyPros', 'Defense rank', 'Median', 'Floor', 'Ceiling']) {
+      expect(sections.find((f) => f.label === label)?.tone).not.toBe('good')
+    }
+  })
+
+  it('never tones a field good when called with no opponent, matching the #161 shape', () => {
+    const sections = allFields(buildDetailSections(FULL_ROW))
+    expect(sections.every((f) => f.tone !== 'good')).toBe(true)
+  })
+})
+
+const CLOSE_CALL_STARTER: OptimalLineupRow = {
+  league_key: 'sleeper',
+  season: 2026,
+  week: 2,
+  slot: 'FLEX1',
+  player_id: '00-0037664',
+  player_name: 'Alec Pierce',
+  projected_points: 9.97,
+  is_close_call: true,
+  bench_player_id: '00-0038606',
+  bench_player_name: 'Parker Washington',
+  bench_projected_points: 9.04,
+}
+
+const NON_CLOSE_CALL_STARTER: OptimalLineupRow = {
+  ...CLOSE_CALL_STARTER,
+  slot: 'QB1',
+  player_id: '00-0038122',
+  player_name: 'C.J. Stroud',
+  is_close_call: false,
+  bench_player_id: null,
+  bench_player_name: null,
+  bench_projected_points: null,
+}
+
+describe('starterPairing / benchPairing', () => {
+  it('opens a close-call starter and pairs it with its bench_player_id', () => {
+    expect(starterPairing(CLOSE_CALL_STARTER)).toEqual({
+      defaultOpen: true,
+      opponentPlayerId: '00-0038606',
+    })
+  })
+
+  it('leaves a non-close-call starter collapsed with no opponent', () => {
+    expect(starterPairing(NON_CLOSE_CALL_STARTER)).toEqual({ defaultOpen: false, opponentPlayerId: null })
+  })
+
+  it('opens the bench player named by a close-call starter and pairs it back with that starter', () => {
+    const starters = [NON_CLOSE_CALL_STARTER, CLOSE_CALL_STARTER]
+    expect(benchPairing('00-0038606', starters)).toEqual({
+      defaultOpen: true,
+      opponentPlayerId: '00-0037664',
+    })
+  })
+
+  it('leaves a bench player named by no close call collapsed with no opponent', () => {
+    const starters = [NON_CLOSE_CALL_STARTER, CLOSE_CALL_STARTER]
+    expect(benchPairing('00-0099999', starters)).toEqual({ defaultOpen: false, opponentPlayerId: null })
+  })
+
+  it('pairs each bench player with the specific close-call starter that named them, not any close call', () => {
+    const secondCloseCall: OptimalLineupRow = {
+      ...CLOSE_CALL_STARTER,
+      slot: 'WR1',
+      player_id: '00-0011111',
+      player_name: 'Second Starter',
+      bench_player_id: '00-0022222',
+      bench_player_name: 'Second Bench',
+    }
+    const starters = [CLOSE_CALL_STARTER, secondCloseCall]
+    expect(benchPairing('00-0038606', starters).opponentPlayerId).toBe('00-0037664')
+    expect(benchPairing('00-0022222', starters).opponentPlayerId).toBe('00-0011111')
+  })
+
+  it('pairs a bench player shared by two close-call starters with the first one in array order', () => {
+    const secondStarterSameBench: OptimalLineupRow = {
+      ...CLOSE_CALL_STARTER,
+      slot: 'TE1',
+      player_id: '00-0033333',
+      player_name: 'Third Starter',
+      bench_player_id: CLOSE_CALL_STARTER.bench_player_id,
+    }
+    const starters = [CLOSE_CALL_STARTER, secondStarterSameBench]
+    const pairing = benchPairing(CLOSE_CALL_STARTER.bench_player_id!, starters)
+    expect(pairing).toEqual({ defaultOpen: true, opponentPlayerId: CLOSE_CALL_STARTER.player_id })
   })
 })
