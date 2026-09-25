@@ -100,13 +100,16 @@ run src.gold.player_archetypes
 # needs draft_board's sleeper_id map to resolve identity, so it runs right after. ros_points needs
 # draft_board's projected_points_adjusted and sleeper_nfl_state's current week to net out points
 # already scored. waiver_rankings joins free_agents onto weekly_projections/ros_points through
-# draft_board's identity crosswalk; optimal_lineup needs my_roster, weekly_projections and that same
-# crosswalk, so it runs after both exist.
+# draft_board's identity crosswalk; drop_candidates (#171) is the other half of that same board,
+# joining my_roster through the identical crosswalk onto ros_points, draft_board's replacement
+# level, player_role_trend (second tier) and injuries (silver) instead. optimal_lineup needs
+# my_roster, weekly_projections and that same crosswalk, so it runs after both exist.
 run src.gold.draft_board
 run src.gold.draft_plan
 run src.gold.weekly_projections
 run src.gold.ros_points
 run src.gold.waiver_rankings
+run src.gold.drop_candidates
 run src.gold.optimal_lineup
 
 # Sixth tier — weekly_player_context (#124) joins together every table the in-season epic (#108)
