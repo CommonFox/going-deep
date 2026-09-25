@@ -101,6 +101,37 @@ export interface WeeklyPlayerContextRow {
   weekly_position_tier: number | null
 }
 
+// Mirrors `viewing_guide`/`viewing_guide_starters` (src/gold/viewing_guide.py) — exported by
+// #169. `broadcast_window` is one of the five standard windows the gold table names in its own
+// docstring, or a raw weekday for the fallback case (a Saturday playoff slate, a Friday
+// international game).
+export interface ViewingGuideRow {
+  league_key: string
+  season: number
+  week: number
+  game_id: string
+  home_team: string
+  away_team: string
+  kickoff: string
+  weekday: string
+  gametime: string
+  broadcast_window: string
+  starter_count: number
+  total_projected_points: number | null
+}
+
+export interface ViewingGuideStarterRow {
+  league_key: string
+  season: number
+  week: number
+  game_id: string
+  slot: string
+  player_id: string
+  player_name: string
+  team: string
+  projected_points: number | null
+}
+
 export const fixtureManifest: Manifest = {
   built_at: new Date().toISOString(),
   schema_version: 1,
