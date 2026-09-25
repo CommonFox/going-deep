@@ -41,6 +41,12 @@ export function AppShell() {
             Waiver
           </NavLink>
           <NavLink
+            to="/viewing-guide"
+            className={({ isActive }) => `${styles.link} ${isActive ? styles.active : ''}`}
+          >
+            Viewing Guide
+          </NavLink>
+          <NavLink
             to="/kitchen-sink"
             className={({ isActive }) => `${styles.link} ${isActive ? styles.active : ''}`}
           >

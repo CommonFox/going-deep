@@ -8,6 +8,7 @@ import { ErrorState } from './components/ErrorState/ErrorState'
 import { Home } from './routes/Home'
 import { Lineup } from './routes/Lineup'
 import { Waiver } from './routes/Waiver'
+import { ViewingGuide } from './routes/ViewingGuide'
 import { KitchenSink } from './routes/KitchenSink'
 
 type ManifestState =
@@ -52,6 +53,7 @@ export function App() {
             <Route path="/" element={<Home />} />
             <Route path="/lineup" element={<Lineup />} />
             <Route path="/waiver" element={<Waiver />} />
+            <Route path="/viewing-guide" element={<ViewingGuide />} />
             <Route path="/kitchen-sink" element={<KitchenSink />} />
           </Route>
         </Routes>

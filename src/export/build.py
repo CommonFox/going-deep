@@ -46,6 +46,13 @@ _TABLE_SORT_BY = {
     "optimal_lineup_bench": ["player_id", "player_name"],
     "waiver_rankings": ["player_id", "player_name"],
     "weekly_player_context": ["player_id", "player_name"],
+    # Broadcast-window grouping and per-window ordering both happen client-side (#169), not from
+    # file order — this is just a stable base order, kickoff first since that's the one dimension
+    # every window itself is ordered by.
+    "viewing_guide": ["kickoff", "game_id"],
+    # Slot order here, unlike optimal_lineup's own file, so each game's starters read in the same
+    # per-game grouping the lineup page already uses.
+    "viewing_guide_starters": ["game_id", "slot"],
 }
 
 
