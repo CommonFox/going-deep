@@ -112,9 +112,13 @@ run src.gold.optimal_lineup
 # Sixth tier — weekly_player_context (#124) joins together every table the in-season epic (#108)
 # built: game_environment, defense_vs_position, player_role_trend and weekly_outcome_rates from
 # the second tier, league_settings from the first, plus draft_board and weekly_projections from
-# the fifth. It runs last among the gold tables because it is a pure join over all of them and has
-# nothing downstream in gold itself.
+# the fifth.
 run src.gold.weekly_player_context
+
+# Seventh tier — viewing_guide (#168) needs optimal_lineup (fifth tier), weekly_player_context
+# (sixth tier, for a starter's current-week team) and game_environment (first tier), so it runs
+# last among the gold tables.
+run src.gold.viewing_guide
 
 echo "── export ────────────────────────────────────────────────"
 # Reads the warehouse this build just finished writing and writes the JSON the SPA (#111) fetches
