@@ -482,6 +482,10 @@ network access of their own.
   available player) carrying both this week's points and rest-of-season points, kept visibly distinct
   rather than blended into one waiver score, so "who helps me this week" and "who helps me the rest of
   the season" stay separately answerable from the free-agent pool.
+- `src/gold/drop_candidates.py` — builds `drop_candidates` (#171): the other half of an add/drop,
+  one row per (league, rostered player) floored against the same `draft_board` replacement level
+  `waiver_rankings` uses, with `player_role_trend`'s role deltas and the current week's
+  `injuries.report_status` riding along unblended rather than folded into the ranking.
 
 ## Front end (`frontend/`)
 
