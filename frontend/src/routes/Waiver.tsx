@@ -10,27 +10,53 @@
  * `waiver_rankings` is already scoped to each league's own current week at build time (see the
  * gold table's own docstring), so unlike `/lineup` this page needs no `current_week.json` lookup —
  * the manifest's `available` entries for this table already name the one (season, week) file each
- * league has. */
+ * league has.
+ *
+ * #173 gives every row a collapsed-by-default `DetailPanel`, reusing the same four sections and
+ * `weekly_player_context` shape #161 built for `/lineup` (`buildDetailSections`) rather than
+ * inventing a second layout. `weekly_player_context` is keyed by `player_id`, the same crosswalk
+ * `waiver_rankings` itself resolves through, and a row with no resolved `player_id` (or no matching
+ * `weekly_player_context` row) falls back to `undefined`, which `buildDetailSections` already
+ * renders as every field `tone: 'unknown'` rather than the panel erroring or hiding. No opponent
+ * pairing here — that's #162's close-call concept, and there's no waiver-board equivalent. */
 
 import { useEffect, useMemo, useState } from 'react'
 import { useLeagueWeek } from '../state/LeagueWeekContext'
 import { DataTable } from '../components/DataTable/DataTable'
+import { DetailPanel } from '../components/DetailPanel/DetailPanel'
 import { EmptyState } from '../components/EmptyState/EmptyState'
 import { LoadingState } from '../components/LoadingState/LoadingState'
 import { ErrorState } from '../components/ErrorState/ErrorState'
 import { getRowKey } from '../lib/rowKey'
-import { fetchManifest } from '../lib/manifest'
+import { fetchManifest, isAvailable } from '../lib/manifest'
 import { fetchExportFile, tableFilePath } from '../lib/exportFetch'
 import { waiverColumns } from '../lib/waiverColumns'
-import type { WaiverRankingRow } from '../lib/fixtures'
+import { buildDetailSections } from '../lib/playerDetail'
+import type { WaiverRankingRow, WeeklyPlayerContextRow } from '../lib/fixtures'
 import styles from './Waiver.module.css'
 
 const POSITIONS = ['QB', 'RB', 'WR', 'TE']
 
+// Same lookup Lineup.tsx uses for its own `context` map: a free agent whose `player_id` never
+// resolved (waiver_rankings' own documented gap) falls back to `undefined`, which
+// `buildDetailSections` already renders as every field `tone: 'unknown'` rather than erroring.
+function contextFor(
+  playerId: string | null,
+  context: Map<string, WeeklyPlayerContextRow>,
+): WeeklyPlayerContextRow | undefined {
+  return playerId ? context.get(playerId) : undefined
+}
+
 type WaiverState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; rows: WaiverRankingRow[]; season: number; week: number }
+  | {
+      status: 'ready'
+      rows: WaiverRankingRow[]
+      context: Map<string, WeeklyPlayerContextRow>
+      season: number
+      week: number
+    }
 
 export function Waiver() {
   const { selection } = useLeagueWeek()
@@ -56,11 +82,17 @@ export function Waiver() {
           throw new Error(`no waiver_rankings published for league "${selection.leagueKey}"`)
         }
 
-        const rows = await fetchExportFile<WaiverRankingRow[]>(
-          tableFilePath('waiver_rankings', entry),
-        )
+        const hasContext = isAvailable(manifest, 'weekly_player_context', entry)
+
+        const [rows, contextRows] = await Promise.all([
+          fetchExportFile<WaiverRankingRow[]>(tableFilePath('waiver_rankings', entry)),
+          hasContext
+            ? fetchExportFile<WeeklyPlayerContextRow[]>(tableFilePath('weekly_player_context', entry))
+            : Promise.resolve<WeeklyPlayerContextRow[]>([]),
+        ])
+        const context = new Map(contextRows.map((row) => [row.player_id, row]))
         if (!cancelled) {
-          setState({ status: 'ready', rows, season: entry.season, week: entry.week })
+          setState({ status: 'ready', rows, context, season: entry.season, week: entry.week })
         }
       } catch (error) {
         if (!cancelled) {
@@ -93,7 +125,7 @@ export function Waiver() {
     return <ErrorState message={state.message} onRetry={() => setRetryToken((token) => token + 1)} />
   }
 
-  const { season, week } = state
+  const { season, week, context } = state
 
   return (
     <div>
@@ -128,13 +160,24 @@ export function Waiver() {
       {filtered.length === 0 ? (
         <EmptyState message="No available players match this filter." />
       ) : (
-        <DataTable
-          columns={waiverColumns}
-          rows={filtered}
-          rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
-          defaultSortKey="weekly"
-          defaultSortDir="desc"
-        />
+        <>
+          <DataTable
+            columns={waiverColumns}
+            rows={filtered}
+            rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
+            defaultSortKey="weekly"
+            defaultSortDir="desc"
+          />
+          <div className={styles.detailList}>
+            {filtered.map((row, index) => (
+              <DetailPanel
+                key={getRowKey(row.player_id, row.player_name, row.position, index)}
+                title={`${row.player_name} — ${row.position}`}
+                sections={buildDetailSections(contextFor(row.player_id, context))}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
