@@ -19,3 +19,10 @@
   font-size: var(--text-sm);
   cursor: pointer;
 }
+
+.detailList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+  margin-top: calc(var(--space) * 3);
+}
