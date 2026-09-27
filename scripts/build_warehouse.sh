@@ -103,13 +103,18 @@ run src.gold.player_archetypes
 # draft_board's identity crosswalk; drop_candidates (#171) is the other half of that same board,
 # joining my_roster through the identical crosswalk onto ros_points, draft_board's replacement
 # level, player_role_trend (second tier) and injuries (silver) instead. optimal_lineup needs
-# my_roster, weekly_projections and that same crosswalk, so it runs after both exist.
+# my_roster, weekly_projections and that same crosswalk, so it runs after both exist. waiver_pairs
+# (#172) is the third leg on the same stool: it pairs every drop_candidates row with every
+# waiver_rankings row in its league and reruns lineup_fill's fill_lineup on the swap, so it needs
+# league_settings (first tier) plus weekly_projections, waiver_rankings and drop_candidates, all
+# already built above.
 run src.gold.draft_board
 run src.gold.draft_plan
 run src.gold.weekly_projections
 run src.gold.ros_points
 run src.gold.waiver_rankings
 run src.gold.drop_candidates
+run src.gold.waiver_pairs
 run src.gold.optimal_lineup
 
 # waiver_transaction_activity (#174) only needs draft_board (fifth tier, for identity) plus the
