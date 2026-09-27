@@ -27,6 +27,24 @@
   background: var(--bg-muted);
 }
 
+/* #186: a row that owns the page's single detail slot needs a click affordance and a highlight
+   that survives after the pointer moves away — `:hover`'s background alone (above) disappears the
+   moment the cursor leaves, which would hide which row the detail panel beside the table belongs
+   to. */
+.selectable {
+  cursor: pointer;
+}
+
+.selectable[data-selected='true'] {
+  background: var(--bg-muted);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.selectable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 /* Below 480px: a real <table> stops being readable, so each row becomes a stacked card of
    label:value pairs instead — pure CSS, no JS breakpoint logic, no horizontal scroll at 320px. */
 @media (max-width: 480px) {

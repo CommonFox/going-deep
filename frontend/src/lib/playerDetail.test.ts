@@ -65,10 +65,40 @@
  *     one bench tight end backing up both a FLEX and a TE close call), `benchPairing` still opens
  *     and pairs with the first matching starter in array order, rather than throwing or picking
  *     arbitrarily on each call.
+ *
+ * Selection defaults (#186 — the lineup page's single detail slot needs to know which player to
+ * show before any row has been clicked):
+ *
+ * `defaultSelectedStarterId`:
+ * 23. A close-call starter's `player_id` wins over array order — the flagged comparison is what a
+ *     drafter would otherwise have had to click to find.
+ * 24. With no close call, the first starter row with a real `player_id` is selected.
+ * 25. A close-call row with a null `player_id` (defensive — shouldn't occur in real export data)
+ *     is skipped in favor of the first row with a real `player_id`.
+ * 26. Every row's `player_id` is null (all empty slots) returns null — nothing to select.
+ * 27. An empty list returns null.
+ *
+ * `defaultSelectedBenchId`:
+ * 28. A close call's `bench_player_id`, when present among the bench rows given, wins over array
+ *     order — same reasoning as the starter side.
+ * 29. A close call's `bench_player_id` that isn't present in the bench rows given (filtered out
+ *     upstream, e.g. no projection) falls back to the first bench row with a real `player_id`
+ *     rather than selecting nothing.
+ * 30. Two independent close calls resolve to the first one's `bench_player_id`, in `starters`'
+ *     array order — the same tie-break `benchPairing` already uses for a shared bench player.
+ * 31. No close call in `starters` selects the first bench row with a real `player_id`.
+ * 32. An empty bench list returns null.
  */
 
 import { describe, expect, it } from 'vitest'
-import { benchPairing, buildDetailSections, starterPairing, weeklyRankTier } from './playerDetail'
+import {
+  benchPairing,
+  buildDetailSections,
+  defaultSelectedBenchId,
+  defaultSelectedStarterId,
+  starterPairing,
+  weeklyRankTier,
+} from './playerDetail'
 import type { OptimalLineupRow, WeeklyPlayerContextRow } from './fixtures'
 
 const FULL_ROW: WeeklyPlayerContextRow = {
@@ -460,5 +490,72 @@ describe('starterPairing / benchPairing', () => {
     const starters = [CLOSE_CALL_STARTER, secondStarterSameBench]
     const pairing = benchPairing(CLOSE_CALL_STARTER.bench_player_id!, starters)
     expect(pairing).toEqual({ defaultOpen: true, opponentPlayerId: CLOSE_CALL_STARTER.player_id })
+  })
+})
+
+describe('defaultSelectedStarterId', () => {
+  it("prefers a close-call starter's player_id over array order", () => {
+    const starters = [NON_CLOSE_CALL_STARTER, CLOSE_CALL_STARTER]
+    expect(defaultSelectedStarterId(starters)).toBe(CLOSE_CALL_STARTER.player_id)
+  })
+
+  it('falls back to the first row with a real player_id when there is no close call', () => {
+    const starters = [NON_CLOSE_CALL_STARTER, { ...CLOSE_CALL_STARTER, is_close_call: false }]
+    expect(defaultSelectedStarterId(starters)).toBe(NON_CLOSE_CALL_STARTER.player_id)
+  })
+
+  it('skips a close-call row with a null player_id in favor of the first row with a real one', () => {
+    const starters = [{ ...CLOSE_CALL_STARTER, player_id: null }, NON_CLOSE_CALL_STARTER]
+    expect(defaultSelectedStarterId(starters)).toBe(NON_CLOSE_CALL_STARTER.player_id)
+  })
+
+  it('returns null when every row is an empty slot', () => {
+    const starters = [{ ...NON_CLOSE_CALL_STARTER, player_id: null }]
+    expect(defaultSelectedStarterId(starters)).toBeNull()
+  })
+
+  it('returns null for an empty list', () => {
+    expect(defaultSelectedStarterId([])).toBeNull()
+  })
+})
+
+describe('defaultSelectedBenchId', () => {
+  const closeCallBench = { player_id: CLOSE_CALL_STARTER.bench_player_id, player_name: 'Parker Washington' }
+  const otherBench = { player_id: '00-0055555', player_name: 'Someone Else' }
+
+  it("prefers a close call's bench_player_id, when present in bench, over array order", () => {
+    const starters = [NON_CLOSE_CALL_STARTER, CLOSE_CALL_STARTER]
+    const bench = [otherBench, closeCallBench]
+    expect(defaultSelectedBenchId(bench, starters)).toBe(CLOSE_CALL_STARTER.bench_player_id)
+  })
+
+  it("falls back to the first bench row with a real player_id when the close call's bench player isn't in bench", () => {
+    const starters = [CLOSE_CALL_STARTER]
+    const bench = [otherBench]
+    expect(defaultSelectedBenchId(bench, starters)).toBe(otherBench.player_id)
+  })
+
+  it("resolves two independent close calls to the first one's bench_player_id, in starters order", () => {
+    const secondCloseCall: OptimalLineupRow = {
+      ...CLOSE_CALL_STARTER,
+      slot: 'WR1',
+      player_id: '00-0011111',
+      bench_player_id: '00-0022222',
+      bench_player_name: 'Second Bench',
+    }
+    const secondBench = { player_id: '00-0022222', player_name: 'Second Bench' }
+    const starters = [CLOSE_CALL_STARTER, secondCloseCall]
+    const bench = [secondBench, closeCallBench]
+    expect(defaultSelectedBenchId(bench, starters)).toBe(CLOSE_CALL_STARTER.bench_player_id)
+  })
+
+  it('selects the first bench row with a real player_id when there is no close call', () => {
+    const starters = [NON_CLOSE_CALL_STARTER]
+    const bench = [{ player_id: null, player_name: 'Empty' }, otherBench]
+    expect(defaultSelectedBenchId(bench, starters)).toBe(otherBench.player_id)
+  })
+
+  it('returns null for an empty bench list', () => {
+    expect(defaultSelectedBenchId([], [CLOSE_CALL_STARTER])).toBeNull()
   })
 })
