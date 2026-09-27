@@ -203,3 +203,12 @@ figure and a recency-windowed figure kept apart rather than blended. An empirica
 has happened, not a prediction of what will.
 _Avoid_: matchup (already spent — see **Matchup**); DvP is fine as shorthand in code or comments,
 but is not the term of record here
+
+**Close call**:
+A starting slot whose starter and best eligible bench alternative land within
+`_CLOSE_CALL_MARGIN_POINTS` (3.0 points) of each other in `optimal_lineup.py`. The margin alone is
+the flag; the *explanation* — which `weekly_player_context` inputs favor which player, field by
+field — is a separate, later concept (#109) layered on top of the same flag, never a blend of the
+two into one verdict.
+_Avoid_: using this to describe any other kind of tie or near-tie in the warehouse — reserved for
+this one lineup-slot comparison
