@@ -7,9 +7,25 @@
   margin-bottom: calc(var(--space) * 3);
 }
 
+.layout {
+  display: grid;
+  gap: calc(var(--space) * 4);
+  align-items: start;
+  margin-top: calc(var(--space) * 3);
+}
+
 .detailList {
   display: flex;
   flex-direction: column;
   gap: calc(var(--space) * 2);
-  margin-top: calc(var(--space) * 3);
+}
+
+/* #182: above 900px there's room for the detail panels to sit in a rail beside the table instead
+   of underneath it — opening one no longer pushes the next section down the page. Below that, the
+   table's own 480px card-stack breakpoint already makes a side-by-side rail unreadable, so it
+   falls back to the same stacked table-then-panels order as before. */
+@media (min-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  }
 }

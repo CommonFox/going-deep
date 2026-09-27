@@ -23,7 +23,13 @@
  * #163 reuses the same `context` map for the tables themselves: each starter/bench row is enriched
  * with its own `weekly_player_context` row (or `undefined`) right before it reaches `DataTable`, so
  * `lineupColumns.tsx`'s rank/tier column and `buildDetailSections`' panel field read off the same
- * row and can never show two different figures for one player/week. */
+ * row and can never show two different figures for one player/week.
+ *
+ * #182: each section's table and its `detailList` sit in a `styles.layout` grid rather than one
+ * stacked on top of the other, so above 900px the panels form a rail beside the table — opening one
+ * doesn't push the next section's table down the page. Below 900px (and always below the table's
+ * own 480px card-stack point) it falls back to the same stacked order as before; the DOM shape is
+ * unchanged, only the CSS layout around it. */
 
 import { useEffect, useState } from 'react'
 import { useLeague } from '../state/LeagueContext'
@@ -176,30 +182,32 @@ export function Lineup() {
 
       <section className={styles.section}>
         <h2>Starters</h2>
-        <DataTable
-          columns={starterColumns}
-          rows={starters.map(
-            (row): StarterDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
-          )}
-          rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.slot, index)}
-        />
-        <div className={styles.detailList}>
-          {starters
-            .filter((row): row is OptimalLineupRow & { player_id: string } => row.player_id != null)
-            .map((row, index) => {
-              const pairing = starterPairing(row)
-              return (
-                <DetailPanel
-                  key={getRowKey(row.player_id, row.player_name, row.slot, index)}
-                  title={`${row.slot} · ${row.player_name}`}
-                  defaultOpen={pairing.defaultOpen}
-                  sections={buildDetailSections(
-                    contextFor(row.player_id, context),
-                    contextFor(pairing.opponentPlayerId, context),
-                  )}
-                />
-              )
-            })}
+        <div className={styles.layout}>
+          <DataTable
+            columns={starterColumns}
+            rows={starters.map(
+              (row): StarterDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
+            )}
+            rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.slot, index)}
+          />
+          <div className={styles.detailList}>
+            {starters
+              .filter((row): row is OptimalLineupRow & { player_id: string } => row.player_id != null)
+              .map((row, index) => {
+                const pairing = starterPairing(row)
+                return (
+                  <DetailPanel
+                    key={getRowKey(row.player_id, row.player_name, row.slot, index)}
+                    title={`${row.slot} · ${row.player_name}`}
+                    defaultOpen={pairing.defaultOpen}
+                    sections={buildDetailSections(
+                      contextFor(row.player_id, context),
+                      contextFor(pairing.opponentPlayerId, context),
+                    )}
+                  />
+                )
+              })}
+          </div>
         </div>
       </section>
 
@@ -215,7 +223,7 @@ export function Lineup() {
         {available.length === 0 ? (
           <p className={styles.caption}>Nothing left on the bench with a projection this week.</p>
         ) : (
-          <>
+          <div className={styles.layout}>
             <DataTable
               columns={benchColumns}
               rows={available.map(
@@ -241,7 +249,7 @@ export function Lineup() {
                   )
                 })}
             </div>
-          </>
+          </div>
         )}
       </section>
     </div>
