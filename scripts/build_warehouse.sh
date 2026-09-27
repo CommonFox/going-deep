@@ -109,6 +109,12 @@ run src.gold.ros_points
 run src.gold.waiver_rankings
 run src.gold.optimal_lineup
 
+# waiver_transaction_activity (#174) only needs draft_board (fifth tier, for identity) plus the
+# sleeper_transactions/espn_transactions/espn_player_ownership/sleeper_players silver tables
+# already loaded in the first block — nothing from waiver_rankings or free_agents, so it runs
+# alongside the rest of the fifth tier rather than after it.
+run src.gold.waiver_transaction_activity
+
 # Sixth tier — weekly_player_context (#124) joins together every table the in-season epic (#108)
 # built: game_environment, defense_vs_position, player_role_trend and weekly_outcome_rates from
 # the second tier, league_settings from the first, plus draft_board and weekly_projections from
