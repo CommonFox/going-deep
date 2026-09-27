@@ -271,3 +271,31 @@ export function benchPairing(benchPlayerId: string, starters: OptimalLineupRow[]
   const starter = starters.find((s) => s.is_close_call && s.bench_player_id === benchPlayerId)
   return starter ? { defaultOpen: true, opponentPlayerId: starter.player_id } : { defaultOpen: false, opponentPlayerId: null }
 }
+
+/** Which starter's row the Lineup page's single detail slot (#186) shows before any row has been
+ * clicked, replacing the old "every row gets its own collapsed-or-open panel" default. A close
+ * call already earned the drafter's attention before there was a click to make — #162's panels
+ * opened by default — so it wins over array order; otherwise the first row with a real
+ * `player_id` keeps the slot from starting empty next to a table that has real rows in it. */
+export function defaultSelectedStarterId(starters: OptimalLineupRow[]): string | null {
+  const closeCall = starters.find((row) => row.is_close_call && row.player_id)
+  if (closeCall) return closeCall.player_id
+  return starters.find((row) => row.player_id)?.player_id ?? null
+}
+
+/** The bench-side mirror of `defaultSelectedStarterId`: prefers whichever bench player a close-call
+ * starter named, provided that player actually made it into `bench` — the bench table's own
+ * filtering (e.g. dropping players with no projection this week) can leave a close call's named
+ * alternative out entirely, in which case this falls back the same way the starter side does, to
+ * the first bench row with a real `player_id`. */
+export function defaultSelectedBenchId(
+  bench: { player_id: string | null }[],
+  starters: OptimalLineupRow[],
+): string | null {
+  const benchIds = new Set(bench.map((row) => row.player_id))
+  const closeCall = starters.find(
+    (row) => row.is_close_call && row.bench_player_id && benchIds.has(row.bench_player_id),
+  )
+  if (closeCall) return closeCall.bench_player_id
+  return bench.find((row) => row.player_id)?.player_id ?? null
+}

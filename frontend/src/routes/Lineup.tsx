@@ -29,7 +29,19 @@
  * stacked on top of the other, so above 900px the panels form a rail beside the table — opening one
  * doesn't push the next section's table down the page. Below 900px (and always below the table's
  * own 480px card-stack point) it falls back to the same stacked order as before; the DOM shape is
- * unchanged, only the CSS layout around it. */
+ * unchanged, only the CSS layout around it.
+ *
+ * #186: that rail used to hold one `DetailPanel` per row, all rendered at once (collapsed unless
+ * #162 flagged a close call), which made the rail's height scale with roster size — exactly the
+ * scrolling problem #182's grid was papering over rather than fixing. `detailList` now holds at
+ * most two panels: the section's currently *selected* row (clicking a `DataTable` row selects it,
+ * via `onRowSelect`/`selectedRowKey`) and, when that selection is one side of a #162 close call,
+ * its paired opponent — reusing `starterPairing`/`benchPairing` unchanged, since "does this
+ * selection have a paired opponent" is exactly what those already answer. `defaultSelectedStarterId`/
+ * `defaultSelectedBenchId` (`playerDetail.ts`) pick a close call's own row as the default selection
+ * when one exists, so the flagged comparison is still visible with no click needed, same as #162's
+ * auto-open did; otherwise the first real row is selected so the rail never starts empty. Starters
+ * and bench are two independent tables and so carry two independent selections. */
 
 import { useEffect, useState } from 'react'
 import { useLeague } from '../state/LeagueContext'
@@ -49,7 +61,13 @@ import {
   type StarterDisplayRow,
   type BenchDisplayRow,
 } from '../lib/lineupColumns'
-import { benchPairing, buildDetailSections, starterPairing } from '../lib/playerDetail'
+import {
+  benchPairing,
+  buildDetailSections,
+  defaultSelectedBenchId,
+  defaultSelectedStarterId,
+  starterPairing,
+} from '../lib/playerDetail'
 import type { OptimalLineupRow, WeeklyPlayerContextRow } from '../lib/fixtures'
 import styles from './Lineup.module.css'
 
@@ -92,6 +110,19 @@ export function Lineup() {
   const { leagueKey } = useLeague()
   const [state, setState] = useState<LineupState>({ status: 'loading' })
   const [retryToken, setRetryToken] = useState(0)
+  // Explicit clicks override the close-call/first-row default computed below; null means "no click
+  // yet, use the default". Reset during render (React's own pattern for "a prop changed, adjust
+  // state" — see the `key`-less alternative in the React docs) rather than an effect, so a
+  // selection from one league's roster doesn't render even once against another league's data
+  // before an effect gets a chance to clear it.
+  const [selectedStarterId, setSelectedStarterId] = useState<string | null>(null)
+  const [selectedBenchId, setSelectedBenchId] = useState<string | null>(null)
+  const [selectionLeagueKey, setSelectionLeagueKey] = useState(leagueKey)
+  if (leagueKey !== selectionLeagueKey) {
+    setSelectionLeagueKey(leagueKey)
+    setSelectedStarterId(null)
+    setSelectedBenchId(null)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -173,6 +204,24 @@ export function Lineup() {
     .filter((row) => row.projected_points != null)
     .sort((a, b) => (b.projected_points ?? 0) - (a.projected_points ?? 0))
 
+  // A `null` id means "no valid row to select" (e.g. every remaining slot is empty), not "select
+  // whichever row happens to have a null player_id" — an empty-slot row's own `player_id` is also
+  // `null`, so the lookup below would otherwise match it by accident.
+  const effectiveStarterId = selectedStarterId ?? defaultSelectedStarterId(starters)
+  const selectedStarter = effectiveStarterId
+    ? starters.find((row) => row.player_id === effectiveStarterId)
+    : undefined
+  const starterOpponentId = selectedStarter ? starterPairing(selectedStarter).opponentPlayerId : null
+
+  const effectiveBenchId = selectedBenchId ?? defaultSelectedBenchId(available, starters)
+  const selectedBench = effectiveBenchId
+    ? available.find((row) => row.player_id === effectiveBenchId)
+    : undefined
+  const benchOpponentId = selectedBench ? benchPairing(selectedBench.player_id!, starters).opponentPlayerId : null
+  const benchOpponentStarter = benchOpponentId
+    ? starters.find((row) => row.player_id === benchOpponentId)
+    : undefined
+
   return (
     <div>
       <h1>Lineup Optimizer</h1>
@@ -189,24 +238,32 @@ export function Lineup() {
               (row): StarterDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
             )}
             rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.slot, index)}
+            selectedRowKey={effectiveStarterId}
+            onRowSelect={(row) => {
+              if (row.player_id) setSelectedStarterId(row.player_id)
+            }}
           />
           <div className={styles.detailList}>
-            {starters
-              .filter((row): row is OptimalLineupRow & { player_id: string } => row.player_id != null)
-              .map((row, index) => {
-                const pairing = starterPairing(row)
-                return (
-                  <DetailPanel
-                    key={getRowKey(row.player_id, row.player_name, row.slot, index)}
-                    title={`${row.slot} · ${row.player_name}`}
-                    defaultOpen={pairing.defaultOpen}
-                    sections={buildDetailSections(
-                      contextFor(row.player_id, context),
-                      contextFor(pairing.opponentPlayerId, context),
-                    )}
-                  />
-                )
-              })}
+            {selectedStarter && (
+              <DetailPanel
+                title={`${selectedStarter.slot} · ${selectedStarter.player_name}`}
+                defaultOpen
+                sections={buildDetailSections(
+                  contextFor(selectedStarter.player_id, context),
+                  contextFor(starterOpponentId, context),
+                )}
+              />
+            )}
+            {selectedStarter && starterOpponentId && (
+              <DetailPanel
+                title={`${selectedStarter.bench_player_name} — bench alternative`}
+                defaultOpen
+                sections={buildDetailSections(
+                  contextFor(starterOpponentId, context),
+                  contextFor(selectedStarter.player_id, context),
+                )}
+              />
+            )}
           </div>
         </div>
       </section>
@@ -230,24 +287,32 @@ export function Lineup() {
                 (row): BenchDisplayRow => ({ ...row, context: contextFor(row.player_id, context) }),
               )}
               rowKey={(row, index) => getRowKey(row.player_id, row.player_name, row.position, index)}
+              selectedRowKey={effectiveBenchId}
+              onRowSelect={(row) => {
+                if (row.player_id) setSelectedBenchId(row.player_id)
+              }}
             />
             <div className={styles.detailList}>
-              {available
-                .filter((row): row is BenchRow & { player_id: string } => row.player_id != null)
-                .map((row, index) => {
-                  const pairing = benchPairing(row.player_id, starters)
-                  return (
-                    <DetailPanel
-                      key={getRowKey(row.player_id, row.player_name, row.position, index)}
-                      title={`${row.player_name} — ${row.position}`}
-                      defaultOpen={pairing.defaultOpen}
-                      sections={buildDetailSections(
-                        contextFor(row.player_id, context),
-                        contextFor(pairing.opponentPlayerId, context),
-                      )}
-                    />
-                  )
-                })}
+              {selectedBench && (
+                <DetailPanel
+                  title={`${selectedBench.player_name} — ${selectedBench.position}`}
+                  defaultOpen
+                  sections={buildDetailSections(
+                    contextFor(selectedBench.player_id, context),
+                    contextFor(benchOpponentId, context),
+                  )}
+                />
+              )}
+              {selectedBench && benchOpponentStarter && (
+                <DetailPanel
+                  title={`${benchOpponentStarter.slot} · ${benchOpponentStarter.player_name} — starter alternative`}
+                  defaultOpen
+                  sections={buildDetailSections(
+                    contextFor(benchOpponentStarter.player_id, context),
+                    contextFor(selectedBench.player_id, context),
+                  )}
+                />
+              )}
             </div>
           </div>
         )}

@@ -14,13 +14,20 @@ export interface Column<T> {
 /** The sortable, narrow-readable data table every real page (#128, #129) renders through, rather
  * than each page building its own. Renders a real <table> above 480px and switches to a stacked
  * label:value card per row below it via CSS — no JS breakpoint logic, no horizontal scroll at
- * 320px (see DataTable.module.css). */
+ * 320px (see DataTable.module.css).
+ *
+ * #186: `onRowSelect` is optional — a table with no caller-provided handler renders exactly as
+ * before, no click affordance at all. `selectedRowKey` is compared against `rowKey`'s own return
+ * value rather than object identity, since sorting produces new row objects each render for the
+ * same underlying player. */
 export function DataTable<T>({
   columns,
   rows,
   rowKey,
   defaultSortKey,
   defaultSortDir = 'asc',
+  selectedRowKey,
+  onRowSelect,
 }: {
   columns: Column<T>[]
   rows: T[]
@@ -30,6 +37,8 @@ export function DataTable<T>({
    * rather than an unsorted table until the first click. */
   defaultSortKey?: string
   defaultSortDir?: 'asc' | 'desc'
+  selectedRowKey?: string | null
+  onRowSelect?: (row: T, index: number) => void
 }) {
   const [sortKey, setSortKey] = useState<string | null>(defaultSortKey ?? null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(defaultSortDir)
@@ -81,15 +90,35 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map((row, index) => (
-            <tr key={rowKey(row, index)} className={styles.row}>
-              {columns.map((column) => (
-                <td key={column.key} className={`mono ${styles.cell}`} data-label={column.header}>
-                  {column.render ? column.render(row) : String(column.accessor?.(row) ?? '')}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {sortedRows.map((row, index) => {
+            const key = rowKey(row, index)
+            const selected = onRowSelect != null && key === selectedRowKey
+            return (
+              <tr
+                key={key}
+                className={onRowSelect ? `${styles.row} ${styles.selectable}` : styles.row}
+                data-selected={selected}
+                aria-selected={onRowSelect ? selected : undefined}
+                tabIndex={onRowSelect ? 0 : undefined}
+                onClick={onRowSelect ? () => onRowSelect(row, index) : undefined}
+                onKeyDown={
+                  onRowSelect
+                    ? (event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return
+                        event.preventDefault()
+                        onRowSelect(row, index)
+                      }
+                    : undefined
+                }
+              >
+                {columns.map((column) => (
+                  <td key={column.key} className={`mono ${styles.cell}`} data-label={column.header}>
+                    {column.render ? column.render(row) : String(column.accessor?.(row) ?? '')}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
