@@ -62,3 +62,11 @@ export function isAvailable(
       entry.week === key.week,
   );
 }
+
+/** Every distinct `league_key` the manifest has a file for, sorted alphabetically for a
+ * deterministic order — what #180's platform toggle offers, replacing the old combined
+ * (league, season, week) dropdown. Data-driven off the manifest rather than a hardcoded
+ * ESPN/Sleeper pair, same "never a dead end" reasoning `isAvailable` follows. */
+export function distinctLeagueKeys(manifest: Manifest): string[] {
+  return [...new Set(manifest.available.map((entry) => entry.league_key))].sort();
+}

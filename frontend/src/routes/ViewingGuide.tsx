@@ -3,9 +3,8 @@
  *
  * Reads the static export (`viewing_guide`, `viewing_guide_starters`, `current_week.json`) —
  * `viewing_guide` spans every week `optimal_lineup` does, so this page resolves "this week" from
- * `current_week.json` rather than `selection.week`, exactly as `Lineup.tsx`'s own docstring
- * explains for the identical reason. `selection.leagueKey` is still the one thing it takes from
- * the shared switcher.
+ * `current_week.json`, exactly as `Lineup.tsx`'s own docstring explains for the identical reason.
+ * `leagueKey` is still the one thing it takes from the shared platform toggle.
  *
  * No file for the current week (a bye-heavy week can legitimately empty every window out) is
  * treated the same as a file with zero rows — both fall through to `groupByWindow([])`, which
@@ -17,7 +16,7 @@
  * column to begin with, so there's nothing here to accidentally render. */
 
 import { useEffect, useState } from 'react'
-import { useLeagueWeek } from '../state/LeagueWeekContext'
+import { useLeague } from '../state/LeagueContext'
 import { LoadingState } from '../components/LoadingState/LoadingState'
 import { ErrorState } from '../components/ErrorState/ErrorState'
 import { getRowKey } from '../lib/rowKey'
@@ -40,7 +39,7 @@ type ViewingGuideState =
     }
 
 export function ViewingGuide() {
-  const { selection } = useLeagueWeek()
+  const { leagueKey } = useLeague()
   const [state, setState] = useState<ViewingGuideState>({ status: 'loading' })
   const [retryToken, setRetryToken] = useState(0)
 
@@ -50,9 +49,9 @@ export function ViewingGuide() {
     async function load() {
       try {
         const [manifest, currentWeeks] = await Promise.all([fetchManifest(), fetchCurrentWeek()])
-        const current = currentWeeks.find((entry) => entry.league_key === selection.leagueKey)
+        const current = currentWeeks.find((entry) => entry.league_key === leagueKey)
         if (!current) {
-          throw new Error(`no current week published for league "${selection.leagueKey}"`)
+          throw new Error(`no current week published for league "${leagueKey}"`)
         }
 
         const hasGuide = isAvailable(manifest, 'viewing_guide', current)
@@ -98,7 +97,7 @@ export function ViewingGuide() {
     return () => {
       cancelled = true
     }
-  }, [selection.leagueKey, retryToken])
+  }, [leagueKey, retryToken])
 
   if (state.status === 'loading') return <LoadingState label="Loading viewing guide…" />
   if (state.status === 'error') {

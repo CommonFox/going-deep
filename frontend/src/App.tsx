@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AppShell } from './components/AppShell/AppShell'
-import { LeagueWeekProvider } from './state/LeagueWeekContext'
+import { LeagueProvider } from './state/LeagueContext'
 import { fetchManifest, type Manifest } from './lib/manifest'
 import { LoadingState } from './components/LoadingState/LoadingState'
 import { ErrorState } from './components/ErrorState/ErrorState'
@@ -46,7 +46,7 @@ export function App() {
   }
 
   return (
-    <LeagueWeekProvider manifest={state.manifest}>
+    <LeagueProvider manifest={state.manifest}>
       <BrowserRouter>
         <Routes>
           <Route element={<AppShell />}>
@@ -58,6 +58,6 @@ export function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-    </LeagueWeekProvider>
+    </LeagueProvider>
   )
 }
