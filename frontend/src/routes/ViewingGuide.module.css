@@ -53,3 +53,21 @@
 .slot {
   color: var(--ink-muted);
 }
+
+.leagueSection {
+  padding-top: calc(var(--space) * 2);
+  border-top: 1px solid var(--border);
+}
+
+.leagueSection:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+
+.leagueLabel {
+  margin: 0 0 calc(var(--space) * 1);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
