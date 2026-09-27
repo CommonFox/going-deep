@@ -3,11 +3,11 @@
  * handling, same "no projection this week" distinction on the bench.
  *
  * Reads the static export (`optimal_lineup`, `optimal_lineup_bench`, `weekly_player_context`,
- * `current_week.json`) — never `selection.week`/`selection.season` from `useLeagueWeek()`, because
- * this page has no manual week control of its own, same as the Streamlit page it replaces.
- * `selection.leagueKey` is the one thing it takes from the shared switcher; everything else about
- * "which week" comes from `current_week.json`, resolved at export time from `schedules` (see
- * `src/export/current_week.py`) since the export doesn't carry `schedules` itself.
+ * `current_week.json`) — this page has no manual week control of its own, same as the Streamlit
+ * page it replaces. `leagueKey` is the one thing it takes from the shared platform toggle;
+ * everything about "which week" comes from `current_week.json`, resolved at export time from
+ * `schedules` (see `src/export/current_week.py`) since the export doesn't carry `schedules`
+ * itself.
  *
  * `weekly_player_context` (#161) backs a `DetailPanel` under every starter and bench row, collapsed
  * by default. It's fetched separately from `optimal_lineup`/`optimal_lineup_bench` and only when
@@ -26,7 +26,7 @@
  * row and can never show two different figures for one player/week. */
 
 import { useEffect, useState } from 'react'
-import { useLeagueWeek } from '../state/LeagueWeekContext'
+import { useLeague } from '../state/LeagueContext'
 import { DataTable } from '../components/DataTable/DataTable'
 import { DetailPanel } from '../components/DetailPanel/DetailPanel'
 import { EmptyState } from '../components/EmptyState/EmptyState'
@@ -83,7 +83,7 @@ type LineupState =
     }
 
 export function Lineup() {
-  const { selection } = useLeagueWeek()
+  const { leagueKey } = useLeague()
   const [state, setState] = useState<LineupState>({ status: 'loading' })
   const [retryToken, setRetryToken] = useState(0)
 
@@ -93,13 +93,13 @@ export function Lineup() {
     async function load() {
       try {
         const [manifest, currentWeeks] = await Promise.all([fetchManifest(), fetchCurrentWeek()])
-        const current = currentWeeks.find((entry) => entry.league_key === selection.leagueKey)
+        const current = currentWeeks.find((entry) => entry.league_key === leagueKey)
         if (!current) {
-          throw new Error(`no current week published for league "${selection.leagueKey}"`)
+          throw new Error(`no current week published for league "${leagueKey}"`)
         }
 
         // The manifest's `available` list answers "does this file exist" so this never has to
-        // probe with a fetch that 404s — the same rule `LeagueWeekContext`'s combo list follows.
+        // probe with a fetch that 404s — the same rule `LeagueContext`'s leagueKeys list follows.
         const hasLineup = isAvailable(manifest, 'optimal_lineup', current)
         if (!hasLineup) {
           if (!cancelled) {
@@ -139,7 +139,7 @@ export function Lineup() {
     return () => {
       cancelled = true
     }
-  }, [selection.leagueKey, retryToken])
+  }, [leagueKey, retryToken])
 
   if (state.status === 'loading') return <LoadingState label="Loading lineup…" />
   if (state.status === 'error') {

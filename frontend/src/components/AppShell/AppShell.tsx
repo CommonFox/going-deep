@@ -1,25 +1,14 @@
-import type { ChangeEvent } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { FreshnessBanner } from '../FreshnessBanner/FreshnessBanner'
-import { useLeagueWeek } from '../../state/LeagueWeekContext'
+import { useLeague } from '../../state/LeagueContext'
+import { platformLabel } from '../../lib/platform'
 import styles from './AppShell.module.css'
 
-/** Nav, freshness banner, and the league/week switcher — wraps every route so none of them
- * re-derive this state per page the way the Streamlit app did. */
+/** Nav, freshness banner, and the platform toggle — wraps every route so none of them re-derive
+ * this state per page the way the Streamlit app did. #180 replaced the old combined league/week
+ * dropdown with this toggle once it turned out no route read the week axis at all. */
 export function AppShell() {
-  const { combos, selection, setSelection } = useLeagueWeek()
-
-  const selectedIndex = combos.findIndex(
-    (combo) =>
-      combo.leagueKey === selection.leagueKey &&
-      combo.season === selection.season &&
-      combo.week === selection.week,
-  )
-
-  function handleComboChange(event: ChangeEvent<HTMLSelectElement>) {
-    const combo = combos[Number(event.target.value)]
-    if (combo) setSelection(combo)
-  }
+  const { leagueKeys, leagueKey, setLeagueKey } = useLeague()
 
   return (
     <div className={styles.shell}>
@@ -53,18 +42,19 @@ export function AppShell() {
             Kitchen Sink
           </NavLink>
         </nav>
-        <select
-          className={`mono ${styles.switcher}`}
-          value={selectedIndex}
-          onChange={handleComboChange}
-          aria-label="League and week"
-        >
-          {combos.map((combo, index) => (
-            <option key={`${combo.leagueKey}-${combo.season}-${combo.week}`} value={index}>
-              {combo.leagueKey} · {combo.season} wk{combo.week}
-            </option>
+        <div className={`mono ${styles.toggle}`} role="group" aria-label="Platform">
+          {leagueKeys.map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={styles.toggleButton}
+              aria-pressed={key === leagueKey}
+              onClick={() => setLeagueKey(key)}
+            >
+              {platformLabel(key)}
+            </button>
           ))}
-        </select>
+        </div>
       </header>
       <div className={styles.bannerSlot}>
         <FreshnessBanner />

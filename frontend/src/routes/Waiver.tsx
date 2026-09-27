@@ -21,7 +21,7 @@
  * pairing here — that's #162's close-call concept, and there's no waiver-board equivalent. */
 
 import { useEffect, useMemo, useState } from 'react'
-import { useLeagueWeek } from '../state/LeagueWeekContext'
+import { useLeague } from '../state/LeagueContext'
 import { DataTable } from '../components/DataTable/DataTable'
 import { DetailPanel } from '../components/DetailPanel/DetailPanel'
 import { EmptyState } from '../components/EmptyState/EmptyState'
@@ -59,7 +59,7 @@ type WaiverState =
     }
 
 export function Waiver() {
-  const { selection } = useLeagueWeek()
+  const { leagueKey } = useLeague()
   const [state, setState] = useState<WaiverState>({ status: 'loading' })
   const [retryToken, setRetryToken] = useState(0)
   const [positions, setPositions] = useState<string[]>(POSITIONS)
@@ -73,13 +73,12 @@ export function Waiver() {
       try {
         const manifest = await fetchManifest()
         // The manifest's `available` list answers "does this file exist" so this never has to
-        // probe with a fetch that 404s — the same rule `LeagueWeekContext`'s combo list follows.
+        // probe with a fetch that 404s — the same rule `LeagueContext`'s leagueKeys list follows.
         const entry = manifest.available.find(
-          (candidate) =>
-            candidate.table === 'waiver_rankings' && candidate.league_key === selection.leagueKey,
+          (candidate) => candidate.table === 'waiver_rankings' && candidate.league_key === leagueKey,
         )
         if (!entry) {
-          throw new Error(`no waiver_rankings published for league "${selection.leagueKey}"`)
+          throw new Error(`no waiver_rankings published for league "${leagueKey}"`)
         }
 
         const hasContext = isAvailable(manifest, 'weekly_player_context', entry)
@@ -105,7 +104,7 @@ export function Waiver() {
     return () => {
       cancelled = true
     }
-  }, [selection.leagueKey, retryToken])
+  }, [leagueKey, retryToken])
 
   const filtered = useMemo(() => {
     if (state.status !== 'ready') return []

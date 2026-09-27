@@ -42,13 +42,34 @@
   color: var(--accent);
 }
 
-.switcher {
-  background: var(--bg-muted);
-  color: var(--ink);
+.toggle {
+  display: inline-flex;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: calc(var(--space) * 1) calc(var(--space) * 2);
+  overflow: hidden;
+}
+
+.toggleButton {
+  background: var(--bg-muted);
+  color: var(--ink-muted);
+  border: none;
+  padding: calc(var(--space) * 1) calc(var(--space) * 3);
   font-size: var(--text-xs);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.toggleButton:not(:first-child) {
+  border-left: 1px solid var(--border);
+}
+
+.toggleButton:hover {
+  color: var(--ink);
+}
+
+.toggleButton[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--bg);
 }
 
 .bannerSlot {
